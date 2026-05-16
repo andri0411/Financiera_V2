@@ -77,17 +77,9 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
   // ── Helpers ──────────────────────────────────────────────
 
   Map<String, dynamic>? _cuotaHoy() {
-    final hoy = DateTime.now();
-    final hoyDate = DateTime(hoy.year, hoy.month, hoy.day);
     for (var c in _cuotas) {
       if (c['estado_pago'] == 'pendiente') {
-        final fechaStr = c['fecha_vencimiento'];
-        if (fechaStr != null) {
-          final fecha = DateTime.tryParse(fechaStr);
-          if (fecha != null && (fecha.isBefore(hoyDate) || fecha.isAtSameMomentAs(hoyDate))) {
-            return c;
-          }
-        }
+        return c;
       }
     }
     return null;

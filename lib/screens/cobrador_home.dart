@@ -20,6 +20,7 @@ class _CobradorHomeScreenState extends State<CobradorHomeScreen> {
   double _pendiente = 0.0;
   List<Map<String, dynamic>> _clientesEnRuta = [];
   Position? _currentPosition;
+  bool _esDiaDescanso = false;
 
   @override
   void initState() {
@@ -38,6 +39,25 @@ class _CobradorHomeScreenState extends State<CobradorHomeScreen> {
 
       final String hoyStr = DateTime.now().toIso8601String().split('T')[0];
       final DateTime hoyDate = DateTime.parse(hoyStr);
+
+      final esLaboralRes = await Supabase.instance.client.rpc('fn_es_dia_laboral', params: {
+        'p_fecha': hoyStr
+      });
+      final bool esLaboral = esLaboralRes == true;
+
+      if (!esLaboral) {
+        if (mounted) {
+          setState(() {
+            _clientesEnRuta = [];
+            _pendiente = 0.0;
+            _esDiaDescanso = true;
+            _isLoading = false;
+          });
+        }
+        return;
+      } else {
+        _esDiaDescanso = false;
+      }
 
       // 1. Obtener perfil
       final perfilRes = await Supabase.instance.client
@@ -428,14 +448,32 @@ class _CobradorHomeScreenState extends State<CobradorHomeScreen> {
             
             // Lista de Clientes
             Expanded(
-              child: _clientesEnRuta.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No hay clientes pendientes en tu ruta hoy.',
-                      style: TextStyle(color: Colors.grey, fontSize: 16),
-                    ),
-                  )
-                : ListView.builder(
+                  child: _clientesEnRuta.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                _esDiaDescanso ? Icons.weekend_outlined : Icons.check_circle_outline, 
+                                size: 64, 
+                                color: const Color(0xFFD1D5DB)
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                _esDiaDescanso 
+                                    ? 'Hoy es día de descanso.\nNo tienes ruta asignada.' 
+                                    : 'No hay clientes en ruta para hoy.',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Color(0xFF6B7280),
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 24),
                     itemCount: _clientesEnRuta.length,
                     itemBuilder: (context, index) {
