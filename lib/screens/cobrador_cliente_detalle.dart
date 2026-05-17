@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:blue_thermal_printer/blue_thermal_printer.dart';
+import 'package:flutter/services.dart';
 
 class CobradorClienteDetalleScreen extends StatefulWidget {
   final Map<String, dynamic> cliente;
@@ -26,12 +28,50 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
   String _resultadoAccion = '';
   Map<String, dynamic>? _prestamo;
   List<Map<String, dynamic>> _cuotas = [];
+  
+  // Configuración del ticket y Bluetooth
+  final BlueThermalPrinter _bluetooth = BlueThermalPrinter.instance;
+  String _ticketHeader = 'FINANCIERA';
+  String _ticketPhone = '';
+  String _ticketFooter = 'Gracias por su Puntualidad';
+  String _nombreCobrador = '';
 
   @override
   void initState() {
     super.initState();
     _prestamo = Map.from(widget.prestamo);
     _fetchData();
+    _fetchTicketConfig();
+  }
+
+  Future<void> _fetchTicketConfig() async {
+    try {
+      final res = await Supabase.instance.client
+          .from('configuracion')
+          .select('ticket_header, ticket_phone, ticket_footer')
+          .eq('id', 1)
+          .single();
+      // Obtener nombre completo del cobrador actual
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      String nombreCob = '';
+      if (userId != null) {
+        final cobrador = await Supabase.instance.client
+            .from('cobradores')
+            .select('nombre_completo')
+            .eq('user_id', userId)
+            .maybeSingle();
+        // Intentar nombre_completo, si no existe intentar 'nombre'
+        nombreCob = cobrador?['nombre_completo'] ?? cobrador?['nombre'] ?? '';
+      }
+      if (mounted) {
+        setState(() {
+          _ticketHeader = res['ticket_header'] ?? 'FINANCIERA';
+          _ticketPhone = res['ticket_phone'] ?? '';
+          _ticketFooter = res['ticket_footer'] ?? 'Gracias por su Puntualidad';
+          _nombreCobrador = nombreCob;
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _fetchData() async {
@@ -86,11 +126,17 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
   }
 
   bool _tieneAdelantos() {
-    final pagadas = _cuotas.where((c) => c['estado_pago'] == 'pagado').length;
-    final inicio = DateTime.tryParse(_prestamo?['fecha_inicio'] ?? '');
-    if (inicio == null) return false;
-    final diasTranscurridos = DateTime.now().difference(inicio).inDays;
-    return pagadas > diasTranscurridos;
+    final cuota = _cuotaHoy();
+    if (cuota == null) return true; // No hay cuotas pendientes (liquidado o adelantó todo)
+    final vencimiento = DateTime.tryParse(cuota['fecha_vencimiento'] ?? '');
+    if (vencimiento == null) return false;
+    
+    final hoy = DateTime.now();
+    final hoyDate = DateTime(hoy.year, hoy.month, hoy.day);
+    final vencDate = DateTime(vencimiento.year, vencimiento.month, vencimiento.day);
+    
+    // Tiene adelantos si su próxima cuota pendiente es para un día futuro
+    return vencDate.isAfter(hoyDate);
   }
 
   void _showSnack(String msg, {bool isError = false}) {
@@ -101,6 +147,110 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
       behavior: SnackBarBehavior.floating,
     ));
   }
+
+  // ── Imprimir Ticket ─────────────────────────────────────
+  Future<void> _imprimirTicket({double montoPagado = 0}) async {
+    try {
+      bool? connected = await _bluetooth.isConnected;
+      if (connected != true) return; // Si no hay impresora, no interrumpir
+
+      final p = _prestamo!;
+      final ahora = DateTime.now();
+      final dateF = DateFormat('dd/MM/yy').format(ahora);
+      final timeF = DateFormat('HH:mm').format(ahora);
+
+      // Conteo ANTES de actualizar => cuotasPagadas ya incluye el pago que acabamos de hacer
+      final cuotasPagadas = _cuotas.where((c) => c['estado_pago'] == 'pagado').length;
+      // Plazo total (cuántos pagos tiene el crédito)
+      final plazo = (p['plazo_dias'] ?? _cuotas.length) as int;
+      // Pagos restantes DESPUÉS de este pago
+      final cuotasRestantes = plazo - cuotasPagadas;
+
+      final cuotaDiaria = (p['cuota_diaria'] ?? 0).toDouble();
+      final atrasosConteo = (p['cuotas_atrasadas_conteo'] ?? 0) as int;
+      final faltante = (p['faltante_actual'] ?? 0).toDouble();
+
+      final nombreCliente = widget.cliente['nombre_completo'] ?? '';
+
+      // Intentar leer fecha_fin, si no existe intentar fecha_finalizacion
+      String fechaVencimiento = '--';
+      final rawFecha = p['fecha_fin'] ?? p['fecha_finalizacion'];
+      if (rawFecha != null) {
+        try {
+          fechaVencimiento = DateFormat('dd/MM/yyyy').format(DateTime.parse(rawFecha.toString()));
+        } catch (_) {}
+      }
+
+      // ── ENCABEZADO ─────────────────────────────────────
+      // Soporta multilínea (ej: "FINANCIERA\nREGIONAL")
+      // Si no tiene saltos de línea pero es muy largo (más de 16 chars para tamaño 2), lo partimos.
+      final headerStr = _ticketHeader.toUpperCase();
+      List<String> headerLines = [];
+      if (headerStr.contains('\n')) {
+        headerLines = headerStr.split('\n');
+      } else {
+        final words = headerStr.split(' ');
+        String curr = '';
+        for (var w in words) {
+          if ((curr.length + w.length + (curr.isEmpty ? 0 : 1)) <= 16) {
+            curr += (curr.isEmpty ? '' : ' ') + w;
+          } else {
+            if (curr.isNotEmpty) headerLines.add(curr);
+            curr = w;
+          }
+        }
+        if (curr.isNotEmpty) headerLines.add(curr);
+      }
+
+      for (String linea in headerLines) {
+        final l = linea.trim();
+        if (l.isNotEmpty) _bluetooth.printCustom(l, 2, 1);
+      }
+      if (_ticketPhone.isNotEmpty) {
+        _bluetooth.printCustom('TEL $_ticketPhone', 1, 1);
+      }
+      _bluetooth.printNewLine();
+
+      // ── DATOS DEL CLIENTE ──────────────────────────────
+      _bluetooth.printCustom('FECHA: $dateF   HORA: $timeF', 1, 0);
+      final nombreCorto = nombreCliente.length > 24 ? nombreCliente.substring(0, 24) : nombreCliente;
+      _bluetooth.printCustom('CLIENTE: $nombreCorto', 1, 0);
+      _bluetooth.printCustom('PAGO DIARIO:\$${cuotaDiaria.toStringAsFixed(0)} PLAZO $plazo', 1, 0);
+      _bluetooth.printCustom('VENCIMIENTO: $fechaVencimiento', 1, 0);
+      if (_nombreCobrador.isNotEmpty) {
+        _bluetooth.printCustom('LE ATENDIO: $_nombreCobrador', 1, 0);
+      }
+
+      _bluetooth.printCustom('--------------------------------', 1, 1);
+      _bluetooth.printCustom('DETALLES DEL PAGO', 1, 1);
+      _bluetooth.printCustom('--------------------------------', 1, 1);
+
+      // PAGOS REALIZADOS = siempre 1 (el pago que acaba de hacer ahora)
+      _bluetooth.printLeftRight('PAGOS REALIZADOS:', '1 PAGO', 1);
+      _bluetooth.printCustom('USTED ESTA EN SU PAGO:', 1, 0);
+      // Número de cuota que acaba de pagar DE total del plazo
+      _bluetooth.printCustom('#$cuotasPagadas DE $plazo PAGO', 1, 0);
+      _bluetooth.printLeftRight('IMPORTE:', '\$${montoPagado.toStringAsFixed(2)}', 1);
+
+      _bluetooth.printCustom('--------------------------------', 1, 1);
+      _bluetooth.printCustom('SALDO', 1, 1);
+      _bluetooth.printCustom('--------------------------------', 1, 1);
+
+      _bluetooth.printLeftRight('DEBE MORATORIAS:', '$atrasosConteo', 1);
+      _bluetooth.printLeftRight('PAGOS ATRASADOS:', '$atrasosConteo', 1);
+      // Pagos restantes = plazo - cuotas ya pagadas (incluyendo el de ahora)
+      _bluetooth.printLeftRight('PAGOS RESTANTES:', '$cuotasRestantes PAGO', 1);
+      _bluetooth.printLeftRight('FALTA LIQUIDAR:', '\$${faltante.toStringAsFixed(2)}', 1);
+
+      _bluetooth.printNewLine();
+      _bluetooth.printCustom(_ticketFooter, 1, 1);
+      _bluetooth.printNewLine();
+      _bluetooth.paperCut();
+    } on PlatformException catch (_) {
+      // Ignorar error de impresión para no bloquear el flujo de cobro
+    } catch (_) {}
+  }
+
 
   Future<bool> _confirm(String title, String body, {Color? confirmColor}) async {
     return await showDialog<bool>(
@@ -146,6 +296,10 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
         'p_cobrador_id': cobradorId,
         'p_fecha_local': fechaLocal,
       });
+      // Recargar datos frescos para ticket
+      await _fetchData();
+      // Imprimir ticket después del cobro
+      await _imprimirTicket(montoPagado: cuotaDiaria);
       if (mounted) setState(() { _atendido = true; _resultadoAccion = 'cobrado'; });
     } catch (e) {
       _showSnack('Error al registrar cobro: \$e', isError: true);
@@ -183,12 +337,11 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
       }
       if (mounted) setState(() { _atendido = true; _resultadoAccion = 'no_pago'; });
     } catch (e) {
-      _showSnack('Error: \$e', isError: true);
+      _showSnack('Error: $e', isError: true);
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
   }
-
   Future<void> _pasar() async {
     final ok = await _confirm('Pasar', 'El cliente pasará al final de la ruta. No se generará mora ni atraso.');
     if (!ok) return;
@@ -197,32 +350,103 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
 
   Future<void> _pagarMoraAtraso() async {
     final mora = (_prestamo?['mora_acumulada'] ?? 0).toDouble();
-    final cuotaDiaria = (_prestamo?['cuota_diaria'] ?? 0).toDouble();
-    final atrasos = (_prestamo?['cuotas_atrasadas_conteo'] ?? 0) * cuotaDiaria;
-    final total = mora + atrasos;
-    final cuota = _cuotas.where((c) => c['estado_pago'] == 'pendiente').isNotEmpty
-        ? _cuotas.firstWhere((c) => c['estado_pago'] == 'pendiente')
-        : null;
-    if (cuota == null) { _showSnack('No hay cuota pendiente.', isError: true); return; }
-    final ok = await _confirm(
-      'Pagar Mora / Atraso',
-      'Se cobrará ${formatter.format(total)} (Atraso: ${formatter.format(atrasos)} + Mora: ${formatter.format(mora)}). ¿Confirmar?',
-      confirmColor: const Color(0xFFDC2626),
+    final atrasosConteo = (_prestamo?['cuotas_atrasadas_conteo'] ?? 0) as int;
+
+    if (mora <= 0) {
+      _showSnack('No hay mora pendiente por pagar.', isError: true);
+      return;
+    }
+
+    // Calcular mora por día
+    final maxMoras = atrasosConteo > 0 ? atrasosConteo : 1;
+    int morasSeleccionadas = maxMoras;
+    final moraPorDia = mora / maxMoras;
+
+    final result = await showDialog<int>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (context, setDialogState) {
+          final total = morasSeleccionadas * moraPorDia;
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Text('Pagar Mora', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF09305A))),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Días de mora a pagar (de $maxMoras):', style: const TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      onPressed: morasSeleccionadas > 1 
+                        ? () => setDialogState(() => morasSeleccionadas--) 
+                        : null,
+                      icon: const Icon(Icons.remove_circle_outline, size: 36),
+                      color: const Color(0xFFDC2626),
+                    ),
+                    const SizedBox(width: 16),
+                    Text(
+                      morasSeleccionadas.toString(),
+                      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF09305A)),
+                    ),
+                    const SizedBox(width: 16),
+                    IconButton(
+                      onPressed: morasSeleccionadas < maxMoras 
+                        ? () => setDialogState(() => morasSeleccionadas++) 
+                        : null,
+                      icon: const Icon(Icons.add_circle_outline, size: 36),
+                      color: const Color(0xFFDC2626),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Divider(),
+                Text('Total a cobrar: \${formatter.format(total)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF09305A))),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, null), child: const Text('Cancelar')),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, morasSeleccionadas),
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                child: const Text('Confirmar Cobro', style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          );
+        });
+      },
     );
-    if (!ok) return;
+
+    if (result == null) return;
+
+    final totalAPagar = result * moraPorDia;
+
+    final cuotasPendientes = _cuotas.where((c) => c['estado_pago'] == 'pendiente').toList();
+    if (cuotasPendientes.isEmpty) {
+      _showSnack('No hay cuotas pendientes para registrar el pago.', isError: true);
+      return;
+    }
+
     setState(() => _isProcessing = true);
     try {
       final cobradorId = Supabase.instance.client.auth.currentUser!.id;
+      final fechaLocal = DateTime.now().toLocal().toIso8601String().split('T')[0];
+      
       await Supabase.instance.client.rpc('fn_procesar_pago', params: {
         'p_prestamo_id': _prestamo!['id'],
-        'p_cuota_id': cuota['id'],
-        'p_monto_total': total,
-        'p_monto_base': atrasos,
-        'p_monto_mora': mora,
+        'p_cuota_id': cuotasPendientes.first['id'],
+        'p_monto_total': totalAPagar,
+        'p_monto_base': 0, // No se pagan cuotas
+        'p_monto_mora': totalAPagar,
         'p_monto_penalizacion': 0,
         'p_cobrador_id': cobradorId,
+        'p_fecha_local': fechaLocal,
       });
-      _showSnack('Mora y atraso pagados.');
+
+      if (mounted) setState(() { _atendido = true; _resultadoAccion = 'cobrado'; });
+      _showSnack('Cobro de mora registrado exitosamente.');
       await _fetchData();
     } catch (e) {
       _showSnack('Error: $e', isError: true);
@@ -338,6 +562,112 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
       await _fetchData();
     } catch (e) {
       _showSnack('Error: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
+  Future<void> _liquidarCredito() async {
+    final faltante = (_prestamo?['faltante_actual'] ?? 0).toDouble();
+    final mora = (_prestamo?['mora_acumulada'] ?? 0).toDouble();
+    final totalALiquidar = faltante + mora;
+
+    final ok = await _confirm('Liquidar Crédito', '¿Deseas liquidar este crédito por ${formatter.format(totalALiquidar)}?\n\nEsto registrará el cobro del saldo pendiente y moras.');
+    if (!ok) return;
+
+    final cuotasPendientes = _cuotas.where((c) => c['estado_pago'] == 'pendiente').toList();
+    if (cuotasPendientes.isEmpty) {
+      _showSnack('No hay cuotas pendientes para registrar.', isError: true);
+      return;
+    }
+
+    setState(() => _isProcessing = true);
+    try {
+      final cobradorId = Supabase.instance.client.auth.currentUser!.id;
+      final fechaLocal = DateTime.now().toLocal().toIso8601String().split('T')[0];
+      
+      // Pagamos todas las cuotas individualmente para mantener el historial
+      for (var cuota in cuotasPendientes) {
+         final montoC = (cuota['monto_cuota'] ?? 0).toDouble();
+         final bool esPrimera = cuota == cuotasPendientes.first;
+         await Supabase.instance.client.rpc('fn_procesar_pago', params: {
+            'p_prestamo_id': _prestamo!['id'],
+            'p_cuota_id': cuota['id'],
+            'p_monto_total': montoC + (esPrimera ? mora : 0),
+            'p_monto_base': montoC,
+            'p_monto_mora': esPrimera ? mora : 0,
+            'p_monto_penalizacion': 0,
+            'p_cobrador_id': cobradorId,
+            'p_fecha_local': fechaLocal,
+         });
+      }
+
+      await Supabase.instance.client.from('prestamos').update({'estado': 'liquidado'}).eq('id', _prestamo!['id']);
+
+      if (mounted) setState(() { _atendido = true; _resultadoAccion = 'cobrado'; });
+      _showSnack('Crédito liquidado exitosamente.');
+      await _fetchData();
+    } catch (e) {
+      _showSnack('Error: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
+  Future<void> _solicitarRenovacion(bool esAnticipada) async {
+    final montoCtrl = TextEditingController();
+    final result = await showDialog<double>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(esAnticipada ? 'Renovación Anticipada' : 'Renovar Crédito', style: const TextStyle(color: Color(0xFF09305A), fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Ingresa el monto que el cliente desea solicitar en el nuevo préstamo:'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: montoCtrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                labelText: 'Monto Solicitado',
+                prefixText: '\$ ',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () {
+               final m = double.tryParse(montoCtrl.text);
+               if (m != null && m > 0) Navigator.pop(ctx, m);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF09305A), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+            child: const Text('Enviar Solicitud', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null) return;
+
+    setState(() => _isProcessing = true);
+    try {
+      final cobradorId = Supabase.instance.client.auth.currentUser!.id;
+      
+      await Supabase.instance.client.from('solicitudes_renovacion').insert({
+        'prestamo_actual_id': _prestamo!['id'],
+        'cliente_id': _prestamo!['cliente_id'],
+        'cobrador_id': cobradorId,
+        'monto_solicitado': result,
+        'es_anticipada': esAnticipada,
+      });
+
+      _showSnack('Solicitud de renovación enviada al dueño.');
+    } catch (e) {
+      _showSnack('Error al enviar solicitud: $e', isError: true);
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
@@ -472,24 +802,83 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
                   const SizedBox(height: 10),
                   _rowInfo('Penalización Grave', formatter.format(penalizacion)),
                   const SizedBox(height: 20),
+
                   // Botón adelantar
-                  InkWell(
-                    onTap: _isProcessing ? null : _adelantarPagos,
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFBFDBFE))),
-                      child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        Icon(Icons.fast_forward_rounded, size: 18, color: Color(0xFF09305A)),
-                        SizedBox(width: 8),
-                        Text('Adelantar Pagos', style: TextStyle(color: Color(0xFF09305A), fontWeight: FontWeight.bold, fontSize: 15)),
-                      ]),
+                  if (p['estado'] != 'liquidado' && faltante > 0)
+                    InkWell(
+                      onTap: _isProcessing ? null : _adelantarPagos,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFBFDBFE))),
+                        child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          Icon(Icons.fast_forward_rounded, size: 18, color: Color(0xFF09305A)),
+                          SizedBox(width: 8),
+                          Text('Adelantar Pagos', style: TextStyle(color: Color(0xFF09305A), fontWeight: FontWeight.bold, fontSize: 15)),
+                        ]),
+                      ),
                     ),
-                  ),
+                  
+                  if (p['estado'] != 'liquidado' && faltante > 0)
+                    const SizedBox(height: 12),
+
+                  // Botón Liquidar
+                  if (p['estado'] != 'liquidado' && faltante > 0)
+                    InkWell(
+                      onTap: _isProcessing ? null : _liquidarCredito,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFA7F3D0))),
+                        child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          Icon(Icons.check_circle_outline, size: 18, color: Color(0xFF065F46)),
+                          SizedBox(width: 8),
+                          Text('Liquidar Préstamo', style: TextStyle(color: Color(0xFF065F46), fontWeight: FontWeight.bold, fontSize: 15)),
+                        ]),
+                      ),
+                    ),
                 ]),
               ),
               const SizedBox(height: 16),
+
+              if (cuotasPagadas >= 18 && p['estado'] != 'liquidado' && faltante > 0)
+                const SizedBox(height: 12),
+
+              // Botón Renovar (Anticipada)
+                  if (cuotasPagadas >= 18 && p['estado'] != 'liquidado' && faltante > 0)
+                    InkWell(
+                      onTap: _isProcessing ? null : () => _solicitarRenovacion(true),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(color: const Color(0xFFFFFBEB), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFFDE68A))),
+                        child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          Icon(Icons.autorenew_rounded, size: 18, color: Color(0xFFB45309)),
+                          SizedBox(width: 8),
+                          Text('Renovar Crédito (Anticipado)', style: TextStyle(color: Color(0xFFB45309), fontWeight: FontWeight.bold, fontSize: 15)),
+                        ]),
+                      ),
+                    ),
+
+                  // Botón Renovar (Liquidado)
+                  if (p['estado'] == 'liquidado' || faltante <= 0)
+                    InkWell(
+                      onTap: _isProcessing ? null : () => _solicitarRenovacion(false),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(color: const Color(0xFFFFFBEB), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFFDE68A))),
+                        child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          Icon(Icons.autorenew_rounded, size: 18, color: Color(0xFFB45309)),
+                          SizedBox(width: 8),
+                          Text('Renovar Crédito', style: TextStyle(color: Color(0xFFB45309), fontWeight: FontWeight.bold, fontSize: 15)),
+                        ]),
+                      ),
+                    ),
 
               // Sección mora/atraso (solo si aplica)
               if (tieneMoraOAtraso) ...[
@@ -500,23 +889,20 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
                     Row(children: [
                       const Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626), size: 16),
                       const SizedBox(width: 6),
-                      const Text('MORA / ATRASO PENDIENTE', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold, fontSize: 12)),
+                      const Text('MORA PENDIENTE', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold, fontSize: 12)),
                     ]),
                     const SizedBox(height: 10),
-                    if (atrasosConteo > 0)
-                      Text('Atrasos: ${formatter.format(montoAtrasos)} ($atrasosConteo día(s))',
-                          style: const TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold, fontSize: 16)),
-                    if (mora > 0) ...[
-                      const SizedBox(height: 4),
-                      Text('Mora: ${formatter.format(mora)}', style: const TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold, fontSize: 16)),
-                    ],
+                    Text('Total: \${formatter.format(mora)}',
+                        style: const TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold, fontSize: 24)),
+                    const SizedBox(height: 4),
+                    Text('Días acumulados: $atrasosConteo', style: const TextStyle(color: Color(0xFFEF4444), fontSize: 13)),
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
                         onPressed: _isProcessing ? null : _pagarMoraAtraso,
                         icon: const Icon(Icons.credit_card, size: 18, color: Colors.white),
-                        label: const Text('PAGAR MORA / ATRASO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        label: const Text('PAGAR MORA', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                         style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626), padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                       ),
                     ),

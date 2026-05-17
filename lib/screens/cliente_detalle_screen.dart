@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'admin_renovacion_detalle_screen.dart';
 
 class ClienteDetalleScreen extends StatefulWidget {
   final Map<String, dynamic> cliente;
@@ -39,13 +40,15 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
           .eq('id', widget.cliente['id'])
           .single();
 
-      // 2. Traer prestamo activo
-      final resPrestamo = await Supabase.instance.client
+      // 2. Traer el ultimo prestamo (puede ser activo, liquidado o renovado)
+      final resPrestamoList = await Supabase.instance.client
           .from('prestamos')
           .select('*, perfiles(nombre_completo)')
           .eq('cliente_id', widget.cliente['id'])
-          .eq('estado', 'activo')
-          .maybeSingle();
+          .order('created_at', ascending: false)
+          .limit(1);
+
+      final resPrestamo = resPrestamoList.isNotEmpty ? resPrestamoList.first : null;
 
       if (resPrestamo != null) {
         _prestamoActivo = resPrestamo;
@@ -227,7 +230,7 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
         ],
       ),
       body: _prestamoActivo == null 
-        ? const Center(child: Text("El cliente no tiene un préstamo activo."))
+        ? const Center(child: Text("El cliente no tiene préstamos."))
         : ListView(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
             children: [
@@ -256,75 +259,126 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
               const SizedBox(height: 24),
 
               // Fila Crédito & Botones Acción
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Tarjeta Crédito Progreso
-                  Expanded(
-                    flex: 5,
-                    child: Container(
-                      height: 110,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.grey.shade200),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('CRÉDITO', style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)),
-                          Text('$cuotasPagadas / $totalCuotas', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF09305A))),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: LinearProgressIndicator(
-                              value: progreso,
-                              backgroundColor: Colors.grey.shade200,
-                              color: const Color(0xFF09305A),
-                              minHeight: 4,
+              if (_prestamoActivo!['estado'] == 'activo')
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Tarjeta Crédito Progreso
+                    Expanded(
+                      flex: 5,
+                      child: Container(
+                        height: 110,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('CRÉDITO', style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)),
+                            Text('$cuotasPagadas / $totalCuotas', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF09305A))),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: LinearProgressIndicator(
+                                value: progreso,
+                                backgroundColor: Colors.grey.shade200,
+                                color: const Color(0xFF09305A),
+                                minHeight: 4,
+                              ),
                             ),
-                          ),
-                          Text('Vence: ${totalCuotas - cuotasPagadas} cuotas rest.', style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                        ],
+                            Text('Vence: ${totalCuotas - cuotasPagadas} cuotas rest.', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  // Botones Contacto
-                  Expanded(
-                    flex: 5,
-                    child: SizedBox(
-                      height: 110,
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    const SizedBox(width: 12),
+                    // Botones Contacto
+                    Expanded(
+                      flex: 5,
+                      child: SizedBox(
+                        height: 110,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            _buildActionBtn('Llamar', Icons.phone_outlined, const Color(0xFFE0F2FE), Colors.blue.shade700, onTap: _llamarCliente, fullWidth: true),
+                            Row(
+                              children: [
+                                Expanded(child: _buildActionBtn('Mapa', Icons.location_on_outlined, const Color(0xFFDCFCE7), Colors.green.shade700, onTap: _abrirMapa)),
+                                const SizedBox(width: 8),
+                                Expanded(child: _buildActionBtn('GPS', Icons.sync, const Color(0xFFFFE4E6), Colors.red.shade700, onTap: _actualizarGPS)),
+                              ],
+                            )
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              else
+                SizedBox(
+                  height: 110,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _buildActionBtn('Llamar', Icons.phone_outlined, const Color(0xFFE0F2FE), Colors.blue.shade700, onTap: _llamarCliente, fullWidth: true),
+                      Row(
                         children: [
-                          _buildActionBtn('Llamar', Icons.phone_outlined, const Color(0xFFE0F2FE), Colors.blue.shade700, onTap: _llamarCliente, fullWidth: true),
-                          Row(
-                            children: [
-                              Expanded(child: _buildActionBtn('Mapa', Icons.location_on_outlined, const Color(0xFFDCFCE7), Colors.green.shade700, onTap: _abrirMapa)),
-                              const SizedBox(width: 8),
-                              Expanded(child: _buildActionBtn('GPS', Icons.sync, const Color(0xFFFFE4E6), Colors.red.shade700, onTap: _actualizarGPS)),
-                            ],
-                          )
+                          Expanded(child: _buildActionBtn('Mapa', Icons.location_on_outlined, const Color(0xFFDCFCE7), Colors.green.shade700, onTap: _abrirMapa)),
+                          const SizedBox(width: 8),
+                          Expanded(child: _buildActionBtn('GPS', Icons.sync, const Color(0xFFFFE4E6), Colors.red.shade700, onTap: _actualizarGPS)),
                         ],
-                      ),
-                    ),
+                      )
+                    ],
                   ),
-                ],
-              ),
+                ),
               const SizedBox(height: 24),
 
-              // Tarjeta Resumen Total a Liquidar Hoy
-              _buildResumenPrestamo(),
-              const SizedBox(height: 32),
+              if (_prestamoActivo!['estado'] == 'activo') ...[
+                // Tarjeta Resumen Total a Liquidar Hoy
+                _buildResumenPrestamo(),
+                const SizedBox(height: 32),
 
-              // Historial de Pagos
-              const Text('HISTORIAL DE PAGOS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
-              const SizedBox(height: 16),
-              ..._cuotas.map((cuota) => _buildCuotaTile(cuota)),
+                // Historial de Pagos
+                const Text('HISTORIAL DE PAGOS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                const SizedBox(height: 16),
+                ..._cuotas.map((cuota) => _buildCuotaTile(cuota)),
 
-              const SizedBox(height: 32),
+                const SizedBox(height: 32),
+              ] else ...[
+                // Mensaje colorido para préstamos inactivos
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFBFDBFE)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: const BoxDecoration(color: Color(0xFF3B82F6), shape: BoxShape.circle),
+                        child: const Icon(Icons.info_outline, color: Colors.white),
+                      ),
+                      const SizedBox(width: 16),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Préstamo Inactivo', style: TextStyle(color: Color(0xFF1E3A8A), fontWeight: FontWeight.bold, fontSize: 16)),
+                            SizedBox(height: 4),
+                            Text('El cliente no tiene un préstamo activo en este momento. Puede crear uno nuevo o renovar el crédito.', style: TextStyle(color: Color(0xFF1D4ED8), fontSize: 13)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 32),
+              ],
               const Text('DOCUMENTOS DEL CLIENTE', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
               const SizedBox(height: 16),
               _buildDocItem('Identificación (INE)', clienteInfo['foto_ine_url'], () => _cambiarDocumento('foto_ine_url', 'ine')),
@@ -337,11 +391,78 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
         ? FloatingActionButton.extended(
             backgroundColor: const Color(0xFF09305A),
             foregroundColor: Colors.white,
-            onPressed: () {
-              // Lógica renovar crédito
+            onPressed: () async {
+              final montoCtrl = TextEditingController();
+              final result = await showDialog<double>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Renovar Crédito (Dueño)', style: TextStyle(color: Color(0xFF09305A), fontWeight: FontWeight.bold)),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Ingresa el monto para el nuevo préstamo:'),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: montoCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: InputDecoration(
+                          labelText: 'Monto Solicitado',
+                          prefixText: '\$ ',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+                    ElevatedButton(
+                      onPressed: () {
+                         final m = double.tryParse(montoCtrl.text);
+                         if (m != null && m > 0) Navigator.pop(ctx, m);
+                      },
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF09305A), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                      child: const Text('Siguiente', style: TextStyle(color: Colors.white)),
+                    ),
+                  ],
+                ),
+              );
+
+              if (result == null) return;
+              
+              setState(() => _isLoading = true);
+              try {
+                final cobradorId = _prestamoActivo!['cobrador_id'];
+                
+                final solRes = await Supabase.instance.client.from('solicitudes_renovacion').insert({
+                  'prestamo_actual_id': _prestamoActivo!['id'],
+                  'cliente_id': _prestamoActivo!['cliente_id'],
+                  'cobrador_id': cobradorId,
+                  'monto_solicitado': result,
+                  'es_anticipada': _prestamoActivo!['estado'] != 'liquidado',
+                }).select().single();
+                
+                if (mounted) {
+                  // Navegamos a la pantalla de detalle de renovación para procesarla como Dueño
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => 
+                        // Importamos dinámicamente si no está en la cabecera
+                        // Ya que esto es admin, usualmente está importado, si no, lo manejaremos
+                        AdminRenovacionDetalleScreen(solicitud: solRes),
+                    ),
+                  );
+                  await _fetchDetalles(); // Recargar datos al volver
+                }
+              } catch (e) {
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+              } finally {
+                if (mounted) setState(() => _isLoading = false);
+              }
             },
             icon: const Icon(Icons.autorenew, size: 20),
-            label: const Text('Renovar', style: TextStyle(fontWeight: FontWeight.bold)),
+            label: const Text('Renovar Crédito', style: TextStyle(fontWeight: FontWeight.bold)),
           )
         : null,
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
@@ -452,7 +573,7 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
       bgColor = const Color(0xFFDCFCE7); // Verde claro
       fgColor = Colors.green.shade700;
       icon = Icons.check;
-      statusText = 'Completada';
+      statusText = 'Pagado';
     } else if (isAtrasada) {
       bgColor = const Color(0xFFFFE4E6); // Rojo claro
       fgColor = Colors.red.shade700;
@@ -497,7 +618,15 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
               children: [
                 Text('Cuota $numCuota', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: isAtrasada ? fgColor : Colors.black87)),
                 const SizedBox(height: 2),
-                Text('$statusText • $fDate', style: TextStyle(color: isAtrasada ? fgColor : Colors.grey, fontSize: 12)),
+                Row(
+                  children: [
+                    Text('$statusText • $fDate', style: TextStyle(color: isAtrasada ? fgColor : Colors.grey, fontSize: 12)),
+                    if (isPagada) ...[
+                      const SizedBox(width: 6),
+                      Icon(Icons.print_outlined, size: 14, color: Colors.grey.shade600),
+                    ]
+                  ],
+                ),
               ],
             ),
           ),

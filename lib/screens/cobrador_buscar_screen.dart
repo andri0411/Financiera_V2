@@ -37,25 +37,30 @@ class _CobradorBuscarScreenState extends State<CobradorBuscarScreen> {
       final userId = Supabase.instance.client.auth.currentUser?.id;
       if (userId == null) throw Exception('No hay usuario autenticado');
 
-      // Obtener todos los préstamos activos asignados al cobrador
+      // Obtener todos los préstamos asignados al cobrador (activos o liquidados/renovados)
       final prestamosActivos = await Supabase.instance.client
           .from('prestamos')
           .select('*, clientes(*)')
           .eq('cobrador_id', userId)
-          .eq('estado', 'activo');
+          .order('created_at', ascending: false);
 
+      Set<String> clientesAgregados = {};
       List<Map<String, dynamic>> clientesTemp = [];
       for (var prestamo in prestamosActivos) {
         final cliente = prestamo['clientes'];
         if (cliente != null) {
-          // Según lo solicitado, mostramos de "PENDIENTE" el monto principal (lo prestado sin interés)
-          double montoPendiente = (prestamo['monto_principal'] ?? 0).toDouble();
-          
-          clientesTemp.add({
-            'cliente': cliente,
-            'prestamo': prestamo,
-            'monto_pendiente': montoPendiente,
-          });
+          final clienteId = cliente['id'] as String;
+          if (!clientesAgregados.contains(clienteId)) {
+            clientesAgregados.add(clienteId);
+            // Según lo solicitado, mostramos de "PENDIENTE" el monto principal (lo prestado sin interés)
+            double montoPendiente = (prestamo['monto_principal'] ?? 0).toDouble();
+            
+            clientesTemp.add({
+              'cliente': cliente,
+              'prestamo': prestamo,
+              'monto_pendiente': montoPendiente,
+            });
+          }
         }
       }
 

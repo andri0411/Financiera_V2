@@ -51,61 +51,28 @@ class _ConfigTicketScreenState extends State<ConfigTicketScreen> {
     });
   }
 
-  void _showBluetoothDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Impresoras Vinculadas'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: _devices.isEmpty ? 1 : _devices.length,
-              itemBuilder: (context, index) {
-                if (_devices.isEmpty) {
-                  return const Text('No hay dispositivos bluetooth vinculados. Por favor vincule la impresora desde la configuración de su teléfono primero.');
-                }
-                final device = _devices[index];
-                return ListTile(
-                  leading: const Icon(Icons.print),
-                  title: Text(device.name ?? 'Desconocido'),
-                  subtitle: Text(device.address ?? ''),
-                  onTap: () async {
-                    Navigator.pop(context);
-                    await bluetooth.connect(device).catchError((e) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error de conexión: $e')));
-                    });
-                    bool? isConnected = await bluetooth.isConnected;
-                    setState(() {
-                      _device = device;
-                      _connected = isConnected ?? false;
-                    });
-                    if (_connected) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Conectado a ${device.name}')));
-                    }
-                  },
-                );
-              },
-            ),
-          ),
-          actions: [
-             if (_connected)
-               TextButton(
-                 onPressed: () async {
-                   await bluetooth.disconnect();
-                   setState(() => _connected = false);
-                   Navigator.pop(context);
-                 },
-                 child: const Text('Desconectar', style: TextStyle(color: Colors.red)),
-               ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cerrar'),
-            ),
-          ],
-        );
-      },
+  void _openBluetoothScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => BluetoothPrinterScreen(
+          bluetooth: bluetooth,
+          initialDevices: _devices,
+          connectedDevice: _connected ? _device : null,
+          onDeviceConnected: (device) {
+            setState(() {
+              _device = device;
+              _connected = true;
+            });
+          },
+          onDeviceDisconnected: () {
+            setState(() {
+              _device = null;
+              _connected = false;
+            });
+          },
+        ),
+      ),
     );
   }
 
@@ -177,7 +144,7 @@ class _ConfigTicketScreenState extends State<ConfigTicketScreen> {
           IconButton(
             icon: Icon(Icons.bluetooth, color: _connected ? Colors.green : Colors.blue),
             tooltip: 'Conectar Impresora',
-            onPressed: _showBluetoothDialog,
+            onPressed: _openBluetoothScreen,
           ),
           TextButton.icon(
             icon: const Icon(Icons.save, color: Colors.blue),
@@ -224,26 +191,26 @@ class _ConfigTicketScreenState extends State<ConfigTicketScreen> {
                               const Align(
                                 alignment: Alignment.centerLeft,
                                 child: Text(
-                                  'FECHA: 11/05/2026      HORA: 08:57\nCLIENTE: GINA JANET POO L HERRERA\nPAGO DIARIO: \$210.0 PLAZO 40\nTERMINO DEL CREDITO: 29/04/2026\nLE ATENDIO: JUAN PEREZ',
+                                  'FECHA: 11/05/26   HORA: 08:57\nCLIENTE: GINA JANET POO\nPAGO DIARIO:\$210.0 PLAZO 40\nVENCIMIENTO: 29/04/2026\nLE ATENDIO: JUAN PEREZ',
                                   style: TextStyle(fontFamily: 'Courier', fontSize: 13, height: 1.5, fontWeight: FontWeight.bold),
                                 ),
                               ),
-                              const SizedBox(height: 16),
-                              const Text('. . . . . . . . . . . . . . . . .', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              const Text('--------------------------------', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
                               const Text('DETALLES DEL PAGO', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold, fontSize: 14)),
-                              const Text('. . . . . . . . . . . . . . . . .', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
+                              const Text('--------------------------------', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
                               const SizedBox(height: 16),
                               const Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text('PAGOS REALIZADOS:', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
-                                  Text('1 PAGOS', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
+                                  Text('1 PAGO', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
                                 ],
                               ),
                               const SizedBox(height: 8),
                               const Align(
                                 alignment: Alignment.centerLeft,
-                                child: Text('USTED ESTA EN SU PAGO:\n#15 DE 40 PAGOS', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold, height: 1.5)),
+                                child: Text('USTED ESTA EN SU PAGO:\n#15 DE 40 PAGO', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold, height: 1.5)),
                               ),
                               const SizedBox(height: 8),
                               const Row(
@@ -253,20 +220,16 @@ class _ConfigTicketScreenState extends State<ConfigTicketScreen> {
                                   Text('\$210.00', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
                                 ],
                               ),
-                              const SizedBox(height: 16),
-                              const Text('GRACIAS POR SU PAGO!!', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 16),
-                              const Text('. . . . . . . . . . . . . . . . .', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 8),
+                              const Text('--------------------------------', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
                               const Text('SALDO', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold, fontSize: 14)),
-                              const Text('. . . . . . . . . . . . . . . . .', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 16),
-                              const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('DEBE MORATORIAS:', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)), Text('\$50.00', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold))]),
+                              const Text('--------------------------------', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
                               const SizedBox(height: 8),
-                              const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('PAGOS ATRASADOS:', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)), Text('\$0.00', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold))]),
+                              const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('DEBE MORATORIAS:', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)), Text('1', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold))]),
                               const SizedBox(height: 8),
-                              const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('PENALIZACION GRAVE', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)), Text('NO', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold))]),
+                              const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('PAGOS ATRASADOS:', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)), Text('0', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold))]),
                               const SizedBox(height: 8),
-                              const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('PAGOS RESTANTES:', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)), Text('25 PAGOS', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold))]),
+                              const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('PAGOS RESTANTES:', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)), Text('25 PAGO', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold))]),
                               const SizedBox(height: 8),
                               const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('FALTA LIQUIDAR:', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)), Text('\$5,250.00', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold))]),
                               const SizedBox(height: 24),
@@ -281,7 +244,7 @@ class _ConfigTicketScreenState extends State<ConfigTicketScreen> {
                         const SizedBox(height: 32),
                         const Text('Configuración Manual', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF09305A))),
                         const SizedBox(height: 16),
-                        _buildTextField('Encabezado del Ticket', _headerController),
+                        _buildTextField('Encabezado del Ticket', _headerController, maxLines: 2),
                         const SizedBox(height: 12),
                         _buildTextField('Teléfono', _phoneController),
                         const SizedBox(height: 12),
@@ -306,16 +269,41 @@ class _ConfigTicketScreenState extends State<ConfigTicketScreen> {
                     label: Text(_connected ? 'Imprimir Muestra' : 'Conecte impresora primero', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     onPressed: () {
                       if (!_connected) {
-                        _showBluetoothDialog();
+                        _openBluetoothScreen();
                         return;
                       }
-                      bluetooth.printCustom(_headerController.text.toUpperCase(), 2, 1);
+                      for (String line in _headerController.text.toUpperCase().split('\n')) {
+                        bluetooth.printCustom(line, 2, 1);
+                      }
                       bluetooth.printCustom('TEL ${_phoneController.text}', 1, 1);
                       bluetooth.printNewLine();
-                      bluetooth.printCustom('ESTA ES UNA PRUEBA DE IMPRESION DEL TICKET PARA COMPROBAR CONEXION', 1, 1);
+                      
+                      bluetooth.printCustom('FECHA: 11/05/26   HORA: 08:57', 1, 0);
+                      bluetooth.printCustom('CLIENTE: GINA JANET POO', 1, 0);
+                      bluetooth.printCustom('PAGO DIARIO:\$210.0 PLAZO 40', 1, 0);
+                      bluetooth.printCustom('VENCIMIENTO: 29/04/2026', 1, 0);
+                      bluetooth.printCustom('LE ATENDIO: JUAN PEREZ', 1, 0);
+                      
+                      bluetooth.printCustom('--------------------------------', 1, 1);
+                      bluetooth.printCustom('DETALLES DEL PAGO', 1, 1);
+                      bluetooth.printCustom('--------------------------------', 1, 1);
+                      
+                      bluetooth.printLeftRight('PAGOS REALIZADOS:', '1 PAGO', 1);
+                      bluetooth.printCustom('USTED ESTA EN SU PAGO:', 1, 0);
+                      bluetooth.printCustom('#15 DE 40 PAGO', 1, 0);
+                      bluetooth.printLeftRight('IMPORTE:', '\$210.00', 1);
+                      
+                      bluetooth.printCustom('--------------------------------', 1, 1);
+                      bluetooth.printCustom('SALDO', 1, 1);
+                      bluetooth.printCustom('--------------------------------', 1, 1);
+                      
+                      bluetooth.printLeftRight('DEBE MORATORIAS:', '1', 1);
+                      bluetooth.printLeftRight('PAGOS ATRASADOS:', '0', 1);
+                      bluetooth.printLeftRight('PAGOS RESTANTES:', '25 PAGO', 1);
+                      bluetooth.printLeftRight('FALTA LIQUIDAR:', '\$5,250.00', 1);
+                      
                       bluetooth.printNewLine();
                       bluetooth.printCustom(_footerController.text, 1, 1);
-                      bluetooth.printNewLine();
                       bluetooth.printNewLine();
                       bluetooth.paperCut();
                     },
@@ -350,4 +338,229 @@ class _ConfigTicketScreenState extends State<ConfigTicketScreen> {
     );
   }
 }
+
+class BluetoothPrinterScreen extends StatefulWidget {
+  final BlueThermalPrinter bluetooth;
+  final List<BluetoothDevice> initialDevices;
+  final BluetoothDevice? connectedDevice;
+  final Function(BluetoothDevice) onDeviceConnected;
+  final VoidCallback onDeviceDisconnected;
+
+  const BluetoothPrinterScreen({
+    super.key,
+    required this.bluetooth,
+    required this.initialDevices,
+    this.connectedDevice,
+    required this.onDeviceConnected,
+    required this.onDeviceDisconnected,
+  });
+
+  @override
+  State<BluetoothPrinterScreen> createState() => _BluetoothPrinterScreenState();
+}
+
+class _BluetoothPrinterScreenState extends State<BluetoothPrinterScreen> {
+  List<BluetoothDevice> _devices = [];
+  BluetoothDevice? _connectedDevice;
+  bool _isConnecting = false;
+  String? _connectingAddress;
+
+  @override
+  void initState() {
+    super.initState();
+    _devices = widget.initialDevices;
+    _connectedDevice = widget.connectedDevice;
+    if (_devices.isEmpty) {
+      _refreshDevices();
+    }
+  }
+
+  Future<void> _refreshDevices() async {
+    List<BluetoothDevice> devices = [];
+    try {
+      devices = await widget.bluetooth.getBondedDevices();
+    } on PlatformException {
+      // ignore
+    }
+    if (mounted) {
+      setState(() {
+        _devices = devices;
+      });
+    }
+  }
+
+  Future<void> _connectToDevice(BluetoothDevice device) async {
+    setState(() {
+      _isConnecting = true;
+      _connectingAddress = device.address;
+    });
+
+    try {
+      // 1. Siempre verificamos el estado real del plugin en Android, no solo nuestra variable local
+      bool? isCurrentlyConnected = await widget.bluetooth.isConnected;
+      
+      // 2. Si el plugin dice que ya hay una conexión activa (incluso si fue en una sesión anterior), la desconectamos por la fuerza.
+      if (isCurrentlyConnected == true) {
+        await widget.bluetooth.disconnect();
+        // Le damos un respiro al hardware de Bluetooth para cerrar el socket
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+      
+      // 3. Ahora sí, intentamos la conexión limpia
+      await widget.bluetooth.connect(device);
+      bool? isConnected = await widget.bluetooth.isConnected;
+      
+      if (isConnected == true) {
+        setState(() {
+          _connectedDevice = device;
+        });
+        widget.onDeviceConnected(device);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Conectado a ${device.name}', style: const TextStyle(color: Colors.white)), backgroundColor: Colors.green));
+          Navigator.pop(context); // Regresar al ticket screen
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error de conexión: $e', style: const TextStyle(color: Colors.white)), backgroundColor: Colors.red));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isConnecting = false;
+          _connectingAddress = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _disconnect() async {
+    await widget.bluetooth.disconnect();
+    setState(() {
+      _connectedDevice = null;
+    });
+    widget.onDeviceDisconnected();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF4F6FB), // Light bluish gray background matching the image
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+        elevation: 0,
+        centerTitle: true,
+        title: const Text('Impresora Bluetooth', style: TextStyle(fontWeight: FontWeight.bold)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _refreshDevices,
+          ),
+        ],
+      ),
+      body: _devices.isEmpty
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Text(
+                  'No hay dispositivos bluetooth vinculados.\nPor favor vincule la impresora desde la configuración de su teléfono primero.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
+                ),
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _devices.length,
+              itemBuilder: (context, index) {
+                final device = _devices[index];
+                final isThisConnected = _connectedDevice?.address == device.address;
+                final isConnectingToThis = _isConnecting && _connectingAddress == device.address;
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.02),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        // Icon container
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8F0FE), // Light blue background for icon
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.print_outlined,
+                            color: Color(0xFF09305A),
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        
+                        // Device info
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                device.name ?? 'Desconocido',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                device.address ?? '',
+                                style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                              ),
+                            ],
+                          ),
+                        ),
+                        
+                        // Action button
+                        ElevatedButton(
+                          onPressed: isConnectingToThis 
+                              ? null 
+                              : (isThisConnected ? _disconnect : () => _connectToDevice(device)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: isThisConnected ? Colors.red.shade50 : const Color(0xFF0B1426), // Dark navy for Connect
+                            foregroundColor: isThisConnected ? Colors.red.shade700 : Colors.white,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(24), // Pill shape
+                            ),
+                          ),
+                          child: isConnectingToThis
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                )
+                              : Text(
+                                  isThisConnected ? 'Desconectar' : 'Conectar',
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
 

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:blue_thermal_printer/blue_thermal_printer.dart';
+import 'package:flutter/services.dart';
+import 'config_ticket_screen.dart';
 
 class CobradorConfigScreen extends StatefulWidget {
   const CobradorConfigScreen({super.key});
@@ -9,22 +12,62 @@ class CobradorConfigScreen extends StatefulWidget {
 }
 
 class _CobradorConfigScreenState extends State<CobradorConfigScreen> {
+  final BlueThermalPrinter _bluetooth = BlueThermalPrinter.instance;
+  bool _isConnected = false;
+  BluetoothDevice? _connectedDevice;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkConnection();
+  }
+
+  Future<void> _checkConnection() async {
+    try {
+      bool? connected = await _bluetooth.isConnected;
+      if (mounted) setState(() => _isConnected = connected ?? false);
+    } catch (_) {}
+  }
+
   Future<void> _cerrarSesion() async {
     await Supabase.instance.client.auth.signOut();
     if (mounted) {
-      // Navegamos al login y limpiamos la pila
       Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
     }
   }
 
-  void _conectarImpresora() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('La función de impresora Bluetooth está en desarrollo.'),
-        behavior: SnackBarBehavior.floating,
+  Future<void> _abrirImpresora() async {
+    List<BluetoothDevice> devices = [];
+    try {
+      devices = await _bluetooth.getBondedDevices();
+    } on PlatformException {
+      // ignore
+    }
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => BluetoothPrinterScreen(
+          bluetooth: _bluetooth,
+          initialDevices: devices,
+          connectedDevice: _isConnected ? _connectedDevice : null,
+          onDeviceConnected: (device) {
+            setState(() {
+              _connectedDevice = device;
+              _isConnected = true;
+            });
+          },
+          onDeviceDisconnected: () {
+            setState(() {
+              _connectedDevice = null;
+              _isConnected = false;
+            });
+          },
+        ),
       ),
     );
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -62,12 +105,12 @@ class _CobradorConfigScreenState extends State<CobradorConfigScreen> {
                 leading: Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF3F4F6),
+                    color: _isConnected ? const Color(0xFFDCFCE7) : const Color(0xFFF3F4F6),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.print_outlined,
-                    color: Color(0xFF09305A),
+                    color: _isConnected ? const Color(0xFF16A34A) : const Color(0xFF09305A),
                   ),
                 ),
                 title: const Text(
@@ -78,15 +121,15 @@ class _CobradorConfigScreenState extends State<CobradorConfigScreen> {
                     fontSize: 16,
                   ),
                 ),
-                subtitle: const Text(
-                  'Conectar para imprimir tickets',
+                subtitle: Text(
+                  _isConnected ? 'Conectada • Toca para cambiar' : 'Conectar para imprimir tickets',
                   style: TextStyle(
-                    color: Colors.grey,
+                    color: _isConnected ? const Color(0xFF16A34A) : Colors.grey,
                     fontSize: 12,
                   ),
                 ),
                 trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
-                onTap: _conectarImpresora,
+                onTap: _abrirImpresora,
               ),
             ),
             
