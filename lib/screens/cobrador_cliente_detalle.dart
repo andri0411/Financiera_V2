@@ -403,7 +403,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
                 ),
                 const SizedBox(height: 16),
                 const Divider(),
-                Text('Total a cobrar: \${formatter.format(total)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF09305A))),
+                Text('Total a cobrar: ${formatter.format(total)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF09305A))),
               ],
             ),
             actions: [
@@ -892,7 +892,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
                       const Text('MORA PENDIENTE', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold, fontSize: 12)),
                     ]),
                     const SizedBox(height: 10),
-                    Text('Total: \${formatter.format(mora)}',
+                    Text('Total: ${formatter.format(mora)}',
                         style: const TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold, fontSize: 24)),
                     const SizedBox(height: 4),
                     Text('Días acumulados: $atrasosConteo', style: const TextStyle(color: Color(0xFFEF4444), fontSize: 13)),
