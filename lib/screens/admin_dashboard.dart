@@ -134,17 +134,21 @@ class _InicioTabState extends State<InicioTab> {
           .lt('fecha_pago', finLocal.toUtc().toIso8601String());
 
       final Map<String, double> recaudadoPorCobrador = {};
+      final Map<String, double> moraRecaudadaPorCobrador = {};
       for (var pago in pagosHoy as List) {
         final id = pago['registrado_por'] as String?;
         if (id == null) continue;
         recaudadoPorCobrador[id] = (recaudadoPorCobrador[id] ?? 0) +
             ((pago['monto_recibido'] ?? 0) as num).toDouble();
+        moraRecaudadaPorCobrador[id] = (moraRecaudadaPorCobrador[id] ?? 0) +
+            ((pago['monto_mora'] ?? 0) as num).toDouble();
       }
 
       final cuotasHoy = await Supabase.instance.client
           .from('cuotas')
           .select('monto_cuota, prestamos!inner(cobrador_id, estado)')
           .eq('fecha_vencimiento', hoyStr)
+          .neq('estado_pago', 'vencido')
           .eq('prestamos.estado', 'activo');
 
       final Map<String, double> metaPorCobrador = {};
@@ -161,7 +165,8 @@ class _InicioTabState extends State<InicioTab> {
       for (var perfil in perfilesRes as List) {
         final id = perfil['id'] as String;
         final recaudado = recaudadoPorCobrador[id] ?? 0.0;
-        final metaScheduled = metaPorCobrador[id] ?? 0.0;
+        final moraAdicional = moraRecaudadaPorCobrador[id] ?? 0.0;
+        final metaScheduled = (metaPorCobrador[id] ?? 0.0) + moraAdicional;
         final meta = recaudado > metaScheduled ? recaudado : metaScheduled;
         cobradoresData.add({
           'id': id,

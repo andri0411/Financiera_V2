@@ -204,7 +204,7 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
 
     final clienteInfo = _clienteActualizado ?? widget.cliente;
     final int totalCuotas = _cuotas.length;
-    final int cuotasPagadas = _cuotas.where((c) => c['estado_pago'] == 'pagado').length;
+    final int cuotasPagadas = _cuotas.where((c) => c['estado_pago'] == 'pagado' || c['estado_pago'] == 'vencido').length;
     final double progreso = totalCuotas == 0 ? 0 : (cuotasPagadas / totalCuotas);
     final idClienteShort = clienteInfo['id'].toString().substring(0, 8).toUpperCase();
 
@@ -499,11 +499,12 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
     double montoPagar = (_prestamoActivo!['monto_total_pagar'] ?? 0).toDouble();
     double faltante = (_prestamoActivo!['faltante_actual'] ?? 0).toDouble();
     double moratorios = (_prestamoActivo!['mora_acumulada'] ?? 0).toDouble();
-    double penalizacion = (_prestamoActivo!['penalizacion_aplicada'] ?? 0).toDouble();
+    int atrasosConteo = (_prestamoActivo!['cuotas_atrasadas_conteo'] ?? 0) as int;
+    double cuotaDiaria = (_prestamoActivo!['cuota_diaria'] ?? 0).toDouble();
+    double montoAtrasos = atrasosConteo * cuotaDiaria;
     
-    // Asumimos que para liquidar TODO sumaríamos faltante + moras + penalización.
-    // O si solo es "lo de hoy" sería cuotaDiaria + moras. Adaptado a la imagen (Liquidación total)
-    double liquidarHoy = faltante + moratorios + penalizacion;
+    // Liquidación total real
+    double liquidarHoy = faltante + moratorios;
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -515,7 +516,7 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('TOTAL A LIQUIDAR (C/ PENALIZACIÓN)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+          const Text('TOTAL A LIQUIDAR HOY', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
           const SizedBox(height: 8),
           Text(formatter.format(liquidarHoy), style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Color(0xFF09305A))),
           const SizedBox(height: 24),
@@ -524,8 +525,10 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
           _buildRowResumen('Faltante', formatter.format(faltante), Colors.red.shade700, true),
           const SizedBox(height: 12),
           _buildRowResumen('Moratorios', formatter.format(moratorios), const Color(0xFF09305A), true),
-          const SizedBox(height: 12),
-          _buildRowResumen('Penalización Grave', formatter.format(penalizacion), const Color(0xFF09305A), true),
+          if (atrasosConteo > 0) ...[
+            const SizedBox(height: 12),
+            _buildRowResumen('Cuota atrasada', formatter.format(montoAtrasos), const Color(0xFFDC2626), true),
+          ]
         ],
       ),
     );
@@ -560,8 +563,9 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
     hoy = DateTime(hoy.year, hoy.month, hoy.day); // Normalizar a medianoche
 
     bool isPagada = estado == 'pagado';
-    bool isAtrasada = !isPagada && cuotaDate.isBefore(hoy);
-    bool isHoy = !isPagada && cuotaDate.isAtSameMomentAs(hoy);
+    bool isVencida = estado == 'vencido';
+    bool isAtrasada = estado == 'pendiente' && cuotaDate.isBefore(hoy);
+    bool isHoy = estado == 'pendiente' && cuotaDate.isAtSameMomentAs(hoy);
 
     // Mantenemos colores solicitados, pero adaptados al layout de la imagen
     Color bgColor;
@@ -574,10 +578,15 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
       fgColor = Colors.green.shade700;
       icon = Icons.check;
       statusText = 'Pagado';
-    } else if (isAtrasada) {
+    } else if (isVencida) {
       bgColor = const Color(0xFFFFE4E6); // Rojo claro
       fgColor = Colors.red.shade700;
       icon = Icons.close;
+      statusText = 'No Pagado';
+    } else if (isAtrasada) {
+      bgColor = const Color(0xFFFFE4E6); // Rojo claro
+      fgColor = Colors.red.shade700;
+      icon = Icons.priority_high;
       statusText = 'Atrasada';
     } else if (isHoy) {
       bgColor = const Color(0xFFFEF3C7); // Naranja claro

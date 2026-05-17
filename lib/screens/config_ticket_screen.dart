@@ -204,7 +204,7 @@ class _ConfigTicketScreenState extends State<ConfigTicketScreen> {
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text('PAGOS REALIZADOS:', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
-                                  Text('1 PAGO', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
+                                  Text('1', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)),
                                 ],
                               ),
                               const SizedBox(height: 8),
@@ -229,7 +229,7 @@ class _ConfigTicketScreenState extends State<ConfigTicketScreen> {
                               const SizedBox(height: 8),
                               const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('PAGOS ATRASADOS:', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)), Text('0', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold))]),
                               const SizedBox(height: 8),
-                              const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('PAGOS RESTANTES:', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)), Text('25 PAGO', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold))]),
+                              const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('PAGOS RESTANTES:', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)), Text('25', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold))]),
                               const SizedBox(height: 8),
                               const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('FALTA LIQUIDAR:', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold)), Text('\$5,250.00', style: TextStyle(fontFamily: 'Courier', fontWeight: FontWeight.bold))]),
                               const SizedBox(height: 24),
@@ -288,7 +288,7 @@ class _ConfigTicketScreenState extends State<ConfigTicketScreen> {
                       bluetooth.printCustom('DETALLES DEL PAGO', 1, 1);
                       bluetooth.printCustom('--------------------------------', 1, 1);
                       
-                      bluetooth.printLeftRight('PAGOS REALIZADOS:', '1 PAGO', 1);
+                      bluetooth.printLeftRight('PAGOS REALIZADOS:', '1', 1);
                       bluetooth.printCustom('USTED ESTA EN SU PAGO:', 1, 0);
                       bluetooth.printCustom('#15 DE 40 PAGO', 1, 0);
                       bluetooth.printLeftRight('IMPORTE:', '\$210.00', 1);
@@ -299,7 +299,7 @@ class _ConfigTicketScreenState extends State<ConfigTicketScreen> {
                       
                       bluetooth.printLeftRight('DEBE MORATORIAS:', '1', 1);
                       bluetooth.printLeftRight('PAGOS ATRASADOS:', '0', 1);
-                      bluetooth.printLeftRight('PAGOS RESTANTES:', '25 PAGO', 1);
+                      bluetooth.printLeftRight('PAGOS RESTANTES:', '25', 1);
                       bluetooth.printLeftRight('FALTA LIQUIDAR:', '\$5,250.00', 1);
                       
                       bluetooth.printNewLine();

@@ -41,17 +41,20 @@ class _CobradoresTabState extends State<CobradoresTab> {
       // 2. Obtener pagos registrados HOY por cualquier cobrador
       final pagosHoy = await Supabase.instance.client
           .from('pagos')
-          .select('registrado_por, monto_recibido')
+          .select('registrado_por, monto_recibido, monto_mora')
           .gte('fecha_pago', inicioLocal.toUtc().toIso8601String())
           .lt('fecha_pago', finLocal.toUtc().toIso8601String());
 
       // Agrupar pagos por cobrador
       final Map<String, double> recaudadoPorCobrador = {};
+      final Map<String, double> moraPorCobrador = {};
       for (var pago in pagosHoy as List) {
         final id = pago['registrado_por'] as String?;
         if (id == null) continue;
         recaudadoPorCobrador[id] = (recaudadoPorCobrador[id] ?? 0) +
             ((pago['monto_recibido'] ?? 0) as num).toDouble();
+        moraPorCobrador[id] = (moraPorCobrador[id] ?? 0) +
+            ((pago['monto_mora'] ?? 0) as num).toDouble();
       }
 
       // 3. Obtener cuotas que vencen HOY de préstamos activos
@@ -59,6 +62,7 @@ class _CobradoresTabState extends State<CobradoresTab> {
           .from('cuotas')
           .select('monto_cuota, prestamos!inner(cobrador_id, estado)')
           .eq('fecha_vencimiento', hoyStr)
+          .neq('estado_pago', 'vencido')
           .eq('prestamos.estado', 'activo');
 
       // Agrupar meta por cobrador
@@ -80,7 +84,8 @@ class _CobradoresTabState extends State<CobradoresTab> {
       for (var perfil in perfilesRes as List) {
         final id = perfil['id'] as String;
         final recaudado = recaudadoPorCobrador[id] ?? 0.0;
-        final metaScheduled = metaPorCobrador[id] ?? 0.0;
+        final moraAdicional = moraPorCobrador[id] ?? 0.0;
+        final metaScheduled = (metaPorCobrador[id] ?? 0.0) + moraAdicional;
         final meta = recaudado > metaScheduled ? recaudado : metaScheduled;
         recaudadoAcc += recaudado;
         metaAcc += meta;

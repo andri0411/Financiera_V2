@@ -31,8 +31,8 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
   
   // Configuración del ticket y Bluetooth
   final BlueThermalPrinter _bluetooth = BlueThermalPrinter.instance;
-  String _ticketHeader = 'FINANCIERA';
-  String _ticketPhone = '';
+  String _ticketHeader = 'FINANCIERA REGIONAL';
+  String _ticketPhone = '999-107-9110';
   String _ticketFooter = 'Gracias por su Puntualidad';
   String _nombreCobrador = '';
 
@@ -56,17 +56,17 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
       String nombreCob = '';
       if (userId != null) {
         final cobrador = await Supabase.instance.client
-            .from('cobradores')
+            .from('perfiles')
             .select('nombre_completo')
-            .eq('user_id', userId)
+            .eq('id', userId)
             .maybeSingle();
-        // Intentar nombre_completo, si no existe intentar 'nombre'
-        nombreCob = cobrador?['nombre_completo'] ?? cobrador?['nombre'] ?? '';
+        // Intentar nombre_completo
+        nombreCob = cobrador?['nombre_completo'] ?? '';
       }
       if (mounted) {
         setState(() {
-          _ticketHeader = res['ticket_header'] ?? 'FINANCIERA';
-          _ticketPhone = res['ticket_phone'] ?? '';
+          _ticketHeader = res['ticket_header'] ?? 'FINANCIERA REGIONAL';
+          _ticketPhone = res['ticket_phone'] ?? '999-107-9110';
           _ticketFooter = res['ticket_footer'] ?? 'Gracias por su Puntualidad';
           _nombreCobrador = nombreCob;
         });
@@ -149,7 +149,12 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
   }
 
   // ── Imprimir Ticket ─────────────────────────────────────
-  Future<void> _imprimirTicket({double montoPagado = 0}) async {
+  Future<void> _imprimirTicket({
+    required double montoPagado,
+    int cuotasQueSePagan = 1,
+    bool esLiquidacion = false,
+    bool soloMora = false,
+  }) async {
     try {
       bool? connected = await _bluetooth.isConnected;
       if (connected != true) return; // Si no hay impresora, no interrumpir
@@ -169,6 +174,8 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
       final cuotaDiaria = (p['cuota_diaria'] ?? 0).toDouble();
       final atrasosConteo = (p['cuotas_atrasadas_conteo'] ?? 0) as int;
       final faltante = (p['faltante_actual'] ?? 0).toDouble();
+      final mora = (p['mora_acumulada'] ?? 0).toDouble();
+      final totalFaltaLiquidar = faltante + mora;
 
       final nombreCliente = widget.cliente['nombre_completo'] ?? '';
 
@@ -182,30 +189,11 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
       }
 
       // ── ENCABEZADO ─────────────────────────────────────
-      // Soporta multilínea (ej: "FINANCIERA\nREGIONAL")
-      // Si no tiene saltos de línea pero es muy largo (más de 16 chars para tamaño 2), lo partimos.
-      final headerStr = _ticketHeader.toUpperCase();
-      List<String> headerLines = [];
-      if (headerStr.contains('\n')) {
-        headerLines = headerStr.split('\n');
-      } else {
-        final words = headerStr.split(' ');
-        String curr = '';
-        for (var w in words) {
-          if ((curr.length + w.length + (curr.isEmpty ? 0 : 1)) <= 16) {
-            curr += (curr.isEmpty ? '' : ' ') + w;
-          } else {
-            if (curr.isNotEmpty) headerLines.add(curr);
-            curr = w;
-          }
-        }
-        if (curr.isNotEmpty) headerLines.add(curr);
-      }
-
-      for (String linea in headerLines) {
-        final l = linea.trim();
+      for (String line in _ticketHeader.toUpperCase().split('\n')) {
+        final l = line.trim();
         if (l.isNotEmpty) _bluetooth.printCustom(l, 2, 1);
       }
+      
       if (_ticketPhone.isNotEmpty) {
         _bluetooth.printCustom('TEL $_ticketPhone', 1, 1);
       }
@@ -225,22 +213,48 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
       _bluetooth.printCustom('DETALLES DEL PAGO', 1, 1);
       _bluetooth.printCustom('--------------------------------', 1, 1);
 
-      // PAGOS REALIZADOS = siempre 1 (el pago que acaba de hacer ahora)
-      _bluetooth.printLeftRight('PAGOS REALIZADOS:', '1 PAGO', 1);
-      _bluetooth.printCustom('USTED ESTA EN SU PAGO:', 1, 0);
-      // Número de cuota que acaba de pagar DE total del plazo
-      _bluetooth.printCustom('#$cuotasPagadas DE $plazo PAGO', 1, 0);
+      // PAGOS REALIZADOS
+      if (soloMora) {
+        _bluetooth.printLeftRight('PAGO APLICADO A:', 'MORA', 1);
+        _bluetooth.printCustom('USTED ESTA PAGANDO:', 1, 0);
+        _bluetooth.printCustom('SOLO MORATORIOS', 1, 0);
+      } else {
+        _bluetooth.printLeftRight('PAGOS REALIZADOS:', '$cuotasQueSePagan', 1);
+        _bluetooth.printCustom('USTED ESTA EN SU PAGO:', 1, 0);
+        if (esLiquidacion) {
+          _bluetooth.printCustom('#$plazo DE $plazo PAGO', 1, 0);
+        } else {
+          // cuotasPagadas ya incluye las cuotas que se están pagando en esta transacción
+          _bluetooth.printCustom('#$cuotasPagadas DE $plazo PAGO', 1, 0);
+        }
+      }
+      
+      if (esLiquidacion && mora > 0) {
+        _bluetooth.printLeftRight('MORA INCLUIDA:', '\$${mora.toStringAsFixed(2)}', 1);
+      }
+      
       _bluetooth.printLeftRight('IMPORTE:', '\$${montoPagado.toStringAsFixed(2)}', 1);
 
       _bluetooth.printCustom('--------------------------------', 1, 1);
       _bluetooth.printCustom('SALDO', 1, 1);
       _bluetooth.printCustom('--------------------------------', 1, 1);
 
-      _bluetooth.printLeftRight('DEBE MORATORIAS:', '$atrasosConteo', 1);
-      _bluetooth.printLeftRight('PAGOS ATRASADOS:', '$atrasosConteo', 1);
-      // Pagos restantes = plazo - cuotas ya pagadas (incluyendo el de ahora)
-      _bluetooth.printLeftRight('PAGOS RESTANTES:', '$cuotasRestantes PAGO', 1);
-      _bluetooth.printLeftRight('FALTA LIQUIDAR:', '\$${faltante.toStringAsFixed(2)}', 1);
+      // Pagos restantes debe ser la cantidad de cuotas pendientes reales
+      final cuotasRestantesReal = _cuotas.where((c) => c['estado_pago'] == 'pendiente').length;
+
+      if (esLiquidacion) {
+        if (mora > 0 || atrasosConteo > 0) {
+          _bluetooth.printLeftRight('DEBE MORATORIAS:', '\$${mora.toStringAsFixed(2)}', 1);
+          _bluetooth.printLeftRight('PAGOS ATRASADOS:', '$atrasosConteo', 1);
+        }
+        _bluetooth.printLeftRight('PAGOS RESTANTES:', '0', 1);
+        _bluetooth.printLeftRight('FALTA LIQUIDAR:', '\$0.00', 1);
+      } else {
+        _bluetooth.printLeftRight('DEBE MORATORIAS:', '\$${mora.toStringAsFixed(2)}', 1);
+        _bluetooth.printLeftRight('PAGOS ATRASADOS:', '$atrasosConteo', 1);
+        _bluetooth.printLeftRight('PAGOS RESTANTES:', '$cuotasRestantesReal', 1);
+        _bluetooth.printLeftRight('FALTA LIQUIDAR:', '\$${totalFaltaLiquidar.toStringAsFixed(2)}', 1);
+      }
 
       _bluetooth.printNewLine();
       _bluetooth.printCustom(_ticketFooter, 1, 1);
@@ -446,8 +460,17 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
       });
 
       if (mounted) setState(() { _atendido = true; _resultadoAccion = 'cobrado'; });
-      _showSnack('Cobro de mora registrado exitosamente.');
+      
+      // Recargar datos para tener los montos actualizados en el ticket
       await _fetchData();
+      
+      // Imprimir el ticket de solo mora
+      await _imprimirTicket(
+        montoPagado: totalAPagar.toDouble(),
+        soloMora: true,
+      );
+
+      _showSnack('Cobro de mora registrado exitosamente.');
     } catch (e) {
       _showSnack('Error: $e', isError: true);
     } finally {
@@ -558,8 +581,15 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
           'p_fecha_local': fechaLocal,
         });
       }
-      _showSnack('$cuotasNum cuota(s) adelantada(s) exitosamente.');
+      // Recargar datos frescos para ticket
       await _fetchData();
+      // Imprimir ticket
+      await _imprimirTicket(
+        montoPagado: (cuotasNum * cuotaDiaria).toDouble(),
+        cuotasQueSePagan: cuotasNum,
+      );
+      
+      _showSnack('$cuotasNum cuota(s) adelantada(s) exitosamente.');
     } catch (e) {
       _showSnack('Error: $e', isError: true);
     } finally {
@@ -605,8 +635,17 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
       await Supabase.instance.client.from('prestamos').update({'estado': 'liquidado'}).eq('id', _prestamo!['id']);
 
       if (mounted) setState(() { _atendido = true; _resultadoAccion = 'cobrado'; });
-      _showSnack('Crédito liquidado exitosamente.');
+      
+      // Recargar datos frescos para ticket
       await _fetchData();
+      // Imprimir ticket
+      await _imprimirTicket(
+        montoPagado: totalALiquidar,
+        cuotasQueSePagan: cuotasPendientes.length,
+        esLiquidacion: true,
+      );
+
+      _showSnack('Crédito liquidado exitosamente.');
     } catch (e) {
       _showSnack('Error: $e', isError: true);
     } finally {
@@ -687,7 +726,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
       return const Scaffold(backgroundColor: Color(0xFFF9FAFB), body: Center(child: CircularProgressIndicator(color: Color(0xFF09305A))));
     }
     final p = _prestamo!;
-    final cuotasPagadas = _cuotas.where((c) => c['estado_pago'] == 'pagado').length;
+    final cuotasPagadas = _cuotas.where((c) => c['estado_pago'] == 'pagado' || c['estado_pago'] == 'vencido').length;
     final totalCuotas = _cuotas.length;
     final progreso = totalCuotas == 0 ? 0.0 : cuotasPagadas / totalCuotas;
     final cuotaDiaria = (p['cuota_diaria'] ?? 0).toDouble();
@@ -783,24 +822,22 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
                   const SizedBox(height: 8),
                   Text(formatter.format(cuotaDiaria), style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: Color(0xFF09305A))),
                   const Divider(height: 32),
-                  _rowInfo('Saldo Pendiente', formatter.format(faltante + montoAtrasos + mora)),
-                  if (atrasosConteo > 0 || mora > 0) ...[
+                  _rowInfo('Saldo Pendiente', formatter.format(faltante + mora)),
+                  if (mora > 0 || atrasosConteo > 0) ...[
                     const SizedBox(height: 6),
                     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                       const Text('  └ Crédito:', style: TextStyle(color: Colors.grey, fontSize: 12)),
                       Text(formatter.format(faltante), style: const TextStyle(color: Colors.grey, fontSize: 12)),
                     ]),
-                    if (atrasosConteo > 0) Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      Text('  └ Atrasos ($atrasosConteo días):', style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12)),
-                      Text(formatter.format(montoAtrasos), style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12, fontWeight: FontWeight.bold)),
-                    ]),
                     if (mora > 0) Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                       const Text('  └ Moratorios:', style: TextStyle(color: Color(0xFFDC2626), fontSize: 12)),
                       Text(formatter.format(mora), style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12, fontWeight: FontWeight.bold)),
                     ]),
+                    if (atrasosConteo > 0) Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      Text('  └ Cuota atrasada ($atrasosConteo):', style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12)),
+                      Text(formatter.format(montoAtrasos), style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12, fontWeight: FontWeight.bold)),
+                    ]),
                   ],
-                  const SizedBox(height: 10),
-                  _rowInfo('Penalización Grave', formatter.format(penalizacion)),
                   const SizedBox(height: 20),
 
                   // Botón adelantar

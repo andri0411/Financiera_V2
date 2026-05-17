@@ -21,6 +21,7 @@ class _CobradorDetalleDuenoState extends State<CobradorDetalleDueno> {
   bool _isSaving = false;
 
   double _recoleccionSemana = 0;
+  double _baseComisionSemana = 0;
   double _comisionPorcentaje = 0;
   String _email = '';
   String _username = '';
@@ -68,13 +69,16 @@ class _CobradorDetalleDuenoState extends State<CobradorDetalleDueno> {
       // Recolección de la semana
       final pagosRes = await Supabase.instance.client
           .from('pagos')
-          .select('monto_recibido')
+          .select('monto_recibido, monto_cuota_base')
           .eq('registrado_por', widget.cobradorId)
           .gte('fecha_pago', lunesInicio.toUtc().toIso8601String())
           .lt('fecha_pago', domingoFin.toUtc().toIso8601String());
 
       _recoleccionSemana = (pagosRes as List)
           .fold(0.0, (s, p) => s + ((p['monto_recibido'] ?? 0) as num).toDouble());
+      
+      _baseComisionSemana = (pagosRes as List)
+          .fold(0.0, (s, p) => s + ((p['monto_cuota_base'] ?? 0) as num).toDouble());
 
       // Comisión configurada
       final configRes = await Supabase.instance.client
@@ -170,7 +174,7 @@ class _CobradorDetalleDuenoState extends State<CobradorDetalleDueno> {
     final inicial = (widget.nombreCompleto.isNotEmpty)
         ? widget.nombreCompleto[0].toUpperCase()
         : '?';
-    final comisionMonto = _recoleccionSemana * (_comisionPorcentaje / 100);
+    final comisionMonto = _baseComisionSemana * (_comisionPorcentaje / 100);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF3F4F6),
