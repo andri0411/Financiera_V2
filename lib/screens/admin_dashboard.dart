@@ -108,11 +108,20 @@ class _InicioTabState extends State<InicioTab> {
         totalInver += (row['monto_principal'] as num?)?.toDouble() ?? 0;
       }
 
-      final pagosResponse = await Supabase.instance.client.from('pagos').select('monto_cuota_base');
-      
+      final renovadosResponse = await Supabase.instance.client.from('prestamos').select('id, monto_principal').eq('estado', 'renovado');
       double utilGenerada = 0;
+      Set<String> renovadosIds = {};
+      for (var row in renovadosResponse) {
+        utilGenerada += (row['monto_principal'] as num?)?.toDouble() ?? 0;
+        renovadosIds.add(row['id'].toString());
+      }
+
+      final pagosResponse = await Supabase.instance.client.from('pagos').select('monto_cuota_base, prestamo_id');
       for (var row in pagosResponse) {
-        utilGenerada += (row['monto_cuota_base'] as num?)?.toDouble() ?? 0;
+        final pid = row['prestamo_id']?.toString() ?? '';
+        if (!renovadosIds.contains(pid)) {
+          utilGenerada += (row['monto_cuota_base'] as num?)?.toDouble() ?? 0;
+        }
       }
 
       // -- FETCH COBRADORES DATA --
@@ -123,7 +132,7 @@ class _InicioTabState extends State<InicioTab> {
 
       final perfilesRes = await Supabase.instance.client
           .from('perfiles')
-          .select('id, nombre_completo')
+          .select('id, nombre_completo, username')
           .eq('rol', 'cobrador')
           .eq('activo', true);
 
@@ -171,6 +180,7 @@ class _InicioTabState extends State<InicioTab> {
         cobradoresData.add({
           'id': id,
           'nombre_completo': perfil['nombre_completo'],
+          'username': perfil['username'] ?? perfil['nombre_completo'],
           'recaudado_hoy': recaudado,
           'meta_total_hoy': meta,
         });
@@ -344,7 +354,13 @@ class _InicioTabState extends State<InicioTab> {
                                               Row(
                                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                                 children: [
-                                                  Text(cobrador['nombre_completo'] ?? 'Sin Nombre', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF09305A))),
+                                                  Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      Text(cobrador['username'] ?? 'Sin Usuario', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF09305A))),
+                                                      Text(cobrador['nombre_completo'] ?? '', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                                                    ],
+                                                  ),
                                                   const Icon(Icons.chevron_right, color: Colors.grey),
                                                 ],
                                               ),

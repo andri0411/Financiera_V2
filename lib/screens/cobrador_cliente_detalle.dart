@@ -653,6 +653,93 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
     }
   }
 
+  Future<void> _reimprimirAccionesHoy() async {
+    setState(() => _isProcessing = true);
+    try {
+      final pId = _prestamo!['id'];
+      final hoy = DateTime.now().toLocal();
+      final inicioDia = DateTime(hoy.year, hoy.month, hoy.day).toUtc().toIso8601String();
+      final finDia = DateTime(hoy.year, hoy.month, hoy.day).add(const Duration(days: 1)).toUtc().toIso8601String();
+
+      final pagosHoy = await Supabase.instance.client
+          .from('pagos')
+          .select()
+          .eq('prestamo_id', pId)
+          .gte('fecha_pago', inicioDia)
+          .lt('fecha_pago', finDia);
+
+      if (pagosHoy.isEmpty) {
+        _showSnack('No hay acciones registradas hoy para reimprimir.');
+        return;
+      }
+
+      final pagosMora = pagosHoy.where((p) => (p['monto_mora'] ?? 0) > 0 && (p['monto_cuota_base'] ?? 0) == 0).toList();
+      final pagosCuotas = pagosHoy.where((p) => (p['monto_cuota_base'] ?? 0) > 0).toList();
+      final esLiquidado = _prestamo!['estado'] == 'liquidado';
+
+      List<Map<String, dynamic>> opciones = [];
+
+      if (pagosMora.isNotEmpty) {
+        double totalMora = pagosMora.fold(0.0, (sum, p) => sum + (p['monto_mora'] ?? 0).toDouble());
+        opciones.add({
+          'titulo': 'Pago de Mora (\$${totalMora.toStringAsFixed(2)})',
+          'accion': () => _imprimirTicket(montoPagado: totalMora, soloMora: true)
+        });
+      }
+
+      if (pagosCuotas.isNotEmpty) {
+        double totalCuotas = pagosCuotas.fold(0.0, (sum, p) => sum + ((p['monto_cuota_base'] ?? 0) + (p['monto_mora'] ?? 0)).toDouble());
+        int numCuotas = pagosCuotas.length;
+        if (esLiquidado) {
+          opciones.add({
+            'titulo': 'Liquidación (\$${totalCuotas.toStringAsFixed(2)})',
+            'accion': () => _imprimirTicket(montoPagado: totalCuotas, cuotasQueSePagan: numCuotas, esLiquidacion: true)
+          });
+        } else {
+          opciones.add({
+            'titulo': numCuotas > 1 ? 'Adelanto de Cuotas (\$${totalCuotas.toStringAsFixed(2)})' : 'Cobro de Cuota (\$${totalCuotas.toStringAsFixed(2)})',
+            'accion': () => _imprimirTicket(montoPagado: totalCuotas, cuotasQueSePagan: numCuotas)
+          });
+        }
+      }
+
+      if (opciones.isEmpty) {
+        _showSnack('No hay acciones imprimibles hoy.');
+        return;
+      }
+
+      if (opciones.length == 1) {
+        _showSnack('Reimprimiendo ticket...');
+        await opciones.first['accion']();
+      } else {
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Reimprimir Ticket', style: TextStyle(color: Color(0xFF09305A), fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: opciones.map((op) => ListTile(
+                leading: const Icon(Icons.print, color: Colors.blue),
+                title: Text(op['titulo']),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  _showSnack('Reimprimiendo ticket...');
+                  await op['accion']();
+                },
+              )).toList(),
+            ),
+          )
+        );
+      }
+
+    } catch (e) {
+      _showSnack('Error al reimprimir: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
   Future<void> _solicitarRenovacion(bool esAnticipada) async {
     final montoCtrl = TextEditingController();
     final result = await showDialog<double>(
@@ -757,6 +844,12 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               decoration: BoxDecoration(color: const Color(0xFFFEF3C7), borderRadius: BorderRadius.circular(8)),
               child: const Text('PRIORITARIO', style: TextStyle(color: Color(0xFFD97706), fontWeight: FontWeight.bold, fontSize: 12)),
+            ),
+          if (_atendido)
+            IconButton(
+              icon: const Icon(Icons.print_outlined),
+              tooltip: 'Reimprimir ticket',
+              onPressed: _isProcessing ? null : _reimprimirAccionesHoy,
             ),
         ],
       ),

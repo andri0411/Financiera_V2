@@ -110,10 +110,18 @@ class _AdminRenovacionDetalleScreenState extends State<AdminRenovacionDetalleScr
     // Efectivo a entregar al cliente
     final aEntregar = montoSolicitado - faltanteAnterior;
 
+    final clienteNombre = widget.solicitud['cliente']?['nombre_completo'] ?? 'Cliente';
+
     return Scaffold(
       backgroundColor: const Color(0xFFF9FAFB),
       appBar: AppBar(
-        title: const Text('Detalle de Renovación'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Detalle de Renovación', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(clienteNombre, style: const TextStyle(fontSize: 12, color: Colors.white70)),
+          ],
+        ),
         backgroundColor: const Color(0xFF09305A),
         foregroundColor: Colors.white,
       ),
