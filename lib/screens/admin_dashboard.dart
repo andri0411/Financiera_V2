@@ -155,16 +155,19 @@ class _InicioTabState extends State<InicioTab> {
 
       final cuotasHoy = await Supabase.instance.client
           .from('cuotas')
-          .select('monto_cuota, prestamos!inner(cobrador_id, estado)')
+          .select('monto_cuota, prestamos!inner(cobrador_id, estado, cliente_id)')
           .eq('fecha_vencimiento', hoyStr)
           .neq('estado_pago', 'vencido')
           .eq('prestamos.estado', 'activo');
 
-      final Map<String, double> metaPorCobrador = {};
-      for (var cuota in cuotasHoy as List) {
-        final prestamo = cuota['prestamos'];
-        if (prestamo == null) continue;
-        final id = prestamo['cobrador_id'] as String?;
+      final atencionHoy = await Supabase.instance.client.from('atencion_diaria').select('cliente_id, estado').eq('fecha', hoyStr).eq('estado', 'no_pago'); final Set<String> clientesNoPago = (atencionHoy as List).map((e) => e['cliente_id'].toString()).toSet();
+        final Map<String, double> metaPorCobrador = {};
+        for (var cuota in cuotasHoy as List) {
+          final prestamo = cuota['prestamos'];
+          if (prestamo == null) continue;
+          final clienteId = prestamo['cliente_id']?.toString();
+          if (clienteId != null && clientesNoPago.contains(clienteId)) continue;
+          final id = prestamo['cobrador_id'] as String?;
         if (id == null) continue;
         metaPorCobrador[id] = (metaPorCobrador[id] ?? 0) +
             ((cuota['monto_cuota'] ?? 0) as num).toDouble();
@@ -413,3 +416,4 @@ class _InicioTabState extends State<InicioTab> {
     );
   }
 }
+

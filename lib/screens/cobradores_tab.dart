@@ -41,42 +41,58 @@ class _CobradoresTabState extends State<CobradoresTab> {
       // 2. Obtener pagos registrados HOY por cualquier cobrador
       final pagosHoy = await Supabase.instance.client
           .from('pagos')
-          .select('registrado_por, monto_recibido, monto_mora')
+          .select('registrado_por, monto_recibido, monto_mora, prestamos(cliente_id)')
           .gte('fecha_pago', inicioLocal.toUtc().toIso8601String())
           .lt('fecha_pago', finLocal.toUtc().toIso8601String());
 
-      // Agrupar pagos por cobrador
+      // Agrupar pagos por cobrador y por cliente
       final Map<String, double> recaudadoPorCobrador = {};
-      final Map<String, double> moraPorCobrador = {};
+      final Map<String, Map<String, double>> recaudadoClientePorCob = {};
+      
       for (var pago in pagosHoy as List) {
         final id = pago['registrado_por'] as String?;
         if (id == null) continue;
-        recaudadoPorCobrador[id] = (recaudadoPorCobrador[id] ?? 0) +
-            ((pago['monto_recibido'] ?? 0) as num).toDouble();
-        moraPorCobrador[id] = (moraPorCobrador[id] ?? 0) +
-            ((pago['monto_mora'] ?? 0) as num).toDouble();
+        
+        final double monto = ((pago['monto_recibido'] ?? 0) as num).toDouble();
+        recaudadoPorCobrador[id] = (recaudadoPorCobrador[id] ?? 0) + monto;
+        
+        final clienteId = pago['prestamos']?['cliente_id']?.toString();
+        if (clienteId != null) {
+          recaudadoClientePorCob[id] ??= {};
+          recaudadoClientePorCob[id]![clienteId] = (recaudadoClientePorCob[id]![clienteId] ?? 0) + monto;
+        }
       }
 
-      // 3. Obtener cuotas que vencen HOY de préstamos activos
+      // 3. Obtener cuotas que vencen HOY de prestamos activos
       final cuotasHoy = await Supabase.instance.client
           .from('cuotas')
-          .select('monto_cuota, prestamos!inner(cobrador_id, estado)')
+          .select('monto_cuota, prestamos!inner(cobrador_id, estado, cliente_id)')
           .eq('fecha_vencimiento', hoyStr)
           .neq('estado_pago', 'vencido')
           .eq('prestamos.estado', 'activo');
 
-      // Agrupar meta por cobrador
-      final Map<String, double> metaPorCobrador = {};
+      // Agrupar meta por cobrador y cliente
+      final atencionHoy = await Supabase.instance.client.from('atencion_diaria').select('cliente_id, estado').eq('fecha', hoyStr).eq('estado', 'no_pago'); 
+      final Set<String> clientesNoPago = (atencionHoy as List).map((e) => e['cliente_id'].toString()).toSet();
+      
+      final Map<String, Map<String, double>> metaClientePorCob = {};
+      
       for (var cuota in cuotasHoy as List) {
         final prestamo = cuota['prestamos'];
         if (prestamo == null) continue;
+        
         final id = prestamo['cobrador_id'] as String?;
         if (id == null) continue;
-        metaPorCobrador[id] = (metaPorCobrador[id] ?? 0) +
-            ((cuota['monto_cuota'] ?? 0) as num).toDouble();
+        
+        final clienteId = prestamo['cliente_id']?.toString();
+        if (clienteId == null) continue;
+        if (clientesNoPago.contains(clienteId)) continue;
+        
+        metaClientePorCob[id] ??= {};
+        metaClientePorCob[id]![clienteId] = (metaClientePorCob[id]![clienteId] ?? 0) + ((cuota['monto_cuota'] ?? 0) as num).toDouble();
       }
 
-      // Meta = max(programado hoy, total cobrado) para reflejar adelantos
+      // Meta = sumatoria del maximo entre lo cobrado al cliente o su meta
       final List<Map<String, dynamic>> resultado = [];
       double recaudadoAcc = 0;
       double metaAcc = 0;
@@ -84,9 +100,20 @@ class _CobradoresTabState extends State<CobradoresTab> {
       for (var perfil in perfilesRes as List) {
         final id = perfil['id'] as String;
         final recaudado = recaudadoPorCobrador[id] ?? 0.0;
-        final moraAdicional = moraPorCobrador[id] ?? 0.0;
-        final metaScheduled = (metaPorCobrador[id] ?? 0.0) + moraAdicional;
-        final meta = recaudado > metaScheduled ? recaudado : metaScheduled;
+        
+        double metaScheduled = 0.0;
+        final mapCob = metaClientePorCob[id] ?? {};
+        final rCob = recaudadoClientePorCob[id] ?? {};
+        
+        // Juntar todos los clientes involucrados hoy (ya sea por meta o por pago)
+        final Set<String> todosClientes = {...mapCob.keys, ...rCob.keys};
+        for (var cId in todosClientes) {
+          final mC = mapCob[cId] ?? 0.0;
+          final rC = rCob[cId] ?? 0.0;
+          metaScheduled += (rC > mC) ? rC : mC;
+        }
+
+        final meta = metaScheduled;
         recaudadoAcc += recaudado;
         metaAcc += meta;
         resultado.add({
@@ -362,3 +389,5 @@ class _CobradoresTabState extends State<CobradoresTab> {
     );
   }
 }
+
+

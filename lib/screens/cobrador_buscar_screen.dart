@@ -223,6 +223,7 @@ class _CobradorBuscarScreenState extends State<CobradorBuscarScreen> {
                 builder: (context) => CobradorClienteDetalleScreen(
                   cliente: cliente,
                   prestamo: item['prestamo'],
+                  enRuta: true, // Desbloquear acciones para demostración
                 ),
               ),
             );

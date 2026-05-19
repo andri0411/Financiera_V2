@@ -95,18 +95,7 @@ class _ConfiguracionTabState extends State<ConfiguracionTab> {
                         subtitle: 'Encabezado y pie de página',
                         onTap: () => _navigateTo(const ConfigTicketScreen()),
                       ),
-                      _buildDivider(),
-                      _buildConfigItem(
-                        icon: Icons.gpp_maybe_outlined,
-                        title: 'Reglas de Incumplimiento',
-                        subtitle: 'Bloqueos automáticos (30 días)',
-                        onTap: () => _navigateTo(const ConfigEditorPercentScreen(
-                          title: 'Reglas de Incumplimiento',
-                          hint: 'Porcentaje penalización grave (30 días)',
-                          dbColumn: 'penalizacion_incumplimiento_30d',
-                          simulationLabel: 'Penalización Grave',
-                        )),
-                      ),
+
                       _buildDivider(),
                       _buildConfigItem(
                         icon: Icons.calendar_month,

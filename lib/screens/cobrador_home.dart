@@ -96,13 +96,11 @@ class _CobradorHomeScreenState extends State<CobradorHomeScreen> {
           .eq('cobrador_id', userId)
           .eq('fecha', hoyStr);
 
-      // 5. Obtener cuotas de todos los préstamos activos del cobrador (pendientes y pagadas)
+      // 5. Obtener cuotas pendientes de todos los préstamos activos del cobrador
       final prestamoIds = (prestamosActivos as List).map((p) => p['id'] as String).toList();
       Map<String, DateTime> proximaCuotaPorPrestamo = {};
-      Map<String, int> cuotasPagadasPorPrestamo = {};
 
       if (prestamoIds.isNotEmpty) {
-        // Cuotas pendientes → para saber cuándo vence la próxima
         final cuotasPendRes = await Supabase.instance.client
             .from('cuotas')
             .select('prestamo_id, fecha_vencimiento')
@@ -116,16 +114,6 @@ class _CobradorHomeScreenState extends State<CobradorHomeScreen> {
             proximaCuotaPorPrestamo[pid] = fecha;
           }
         }
-        // Cuotas pagadas → para detectar adelantos
-        final cuotasPagRes = await Supabase.instance.client
-            .from('cuotas')
-            .select('prestamo_id')
-            .inFilter('prestamo_id', prestamoIds)
-            .eq('estado_pago', 'pagado');
-        for (var c in cuotasPagRes as List) {
-          final pid = c['prestamo_id'] as String;
-          cuotasPagadasPorPrestamo[pid] = (cuotasPagadasPorPrestamo[pid] ?? 0) + 1;
-        }
       }
 
       // Mapa para acceso rápido a las atenciones
@@ -134,14 +122,15 @@ class _CobradorHomeScreenState extends State<CobradorHomeScreen> {
       };
 
       // 6. Filtrar clientes en ruta:
-      //    - fecha_inicio ya pasó
-      //    - sin atención hoy (cobrado/no_pago)
-      //    - tiene cuota vencida HOY o antes, O tiene adelantos que cubren hoy
+      //    REGLA 1: Cuota vence HOY o antes (al día o vencida)
+      //    REGLA 2: Tiene mora_acumulada > 0 (aunque tenga adelanto, viene a cobrar mora)
+      //    EXCEPCIÓN: Ya fue atendido hoy (cobrado/no_pago)
       List<Map<String, dynamic>> clientesFiltrados = [];
       for (var prestamo in prestamosActivos) {
         final cliente = prestamo['clientes'];
         if (cliente == null) continue;
 
+        // Verificar que el préstamo ya inició
         final fechaInicioStr = prestamo['fecha_inicio'];
         if (fechaInicioStr != null) {
           final fechaInicio = DateTime.tryParse(fechaInicioStr);
@@ -150,40 +139,35 @@ class _CobradorHomeScreenState extends State<CobradorHomeScreen> {
 
         final prestamoId = prestamo['id'] as String;
         final proximaCuota = proximaCuotaPorPrestamo[prestamoId];
-        final pagadas = cuotasPagadasPorPrestamo[prestamoId] ?? 0;
+        final mora = (prestamo['mora_acumulada'] ?? 0).toDouble();
+        final atrasosConteo = (prestamo['cuotas_atrasadas_conteo'] ?? 0) as int;
 
-        // Calcular si tiene adelantos cubriendo hoy
-        bool tieneAdelantos = false;
-        if (fechaInicioStr != null) {
-          final fechaInicio = DateTime.tryParse(fechaInicioStr);
-          if (fechaInicio != null) {
-            final diasTranscurridos = hoyDate.difference(
-              DateTime(fechaInicio.year, fechaInicio.month, fechaInicio.day)
-            ).inDays;
-            tieneAdelantos = pagadas > diasTranscurridos;
-          }
-        }
-
-        // Incluir si: tiene cuota vencida hoy/antes O tiene adelantos activos
+        // REGLA 1: Cuota vence HOY o antes
         final cuotaVenceHoyOAntes = proximaCuota != null && !proximaCuota.isAfter(hoyDate);
-        if (!cuotaVenceHoyOAntes && !tieneAdelantos) continue;
+        // REGLA 2: Tiene mora pendiente
+        final tieneMoraPendiente = mora > 0 || atrasosConteo > 0;
+        // ¿Tiene adelanto activo? (próxima cuota vence en el futuro)
+        final tieneAdelanto = proximaCuota != null && proximaCuota.isAfter(hoyDate);
 
+        if (!cuotaVenceHoyOAntes && !tieneMoraPendiente) continue;
+
+        // Ya atendido hoy → saltar
         final estadoAtencion = atencionesMap[cliente['id']];
-        if (estadoAtencion == null || estadoAtencion == 'pendiente') {
-          double montoMostrar = (prestamo['cuota_diaria'] ?? 0).toDouble();
-          clientesFiltrados.add({
-            'cliente': cliente,
-            'prestamo': prestamo,
-            'monto_pendiente': montoMostrar,
-            'tiene_adelantos': tieneAdelantos,
-            'distancia': double.maxFinite,
-          });
-        }
+        if (estadoAtencion != null && estadoAtencion != 'pendiente') continue;
+
+        double montoMostrar = (prestamo['cuota_diaria'] ?? 0).toDouble();
+        clientesFiltrados.add({
+          'cliente': cliente,
+          'prestamo': prestamo,
+          'monto_pendiente': montoMostrar,
+          'tiene_adelantos': tieneAdelanto && !cuotaVenceHoyOAntes,
+          'distancia': double.maxFinite,
+        });
       }
 
       _clientesEnRuta = clientesFiltrados;
 
-      // Pendiente = cuotas de clientes sin atender hoy (solo los que tienen cuota real hoy)
+      // Pendiente = cuotas de hoy + moras (clientes sin adelanto)
       _pendiente = clientesFiltrados
           .where((c) => !(c['tiene_adelantos'] as bool))
           .fold(0.0, (sum, c) => sum + (c['monto_pendiente'] as double));

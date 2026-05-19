@@ -1,4 +1,4 @@
-// ignore_for_file: use_build_context_synchronously
+﻿// ignore_for_file: use_build_context_synchronously
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
@@ -9,11 +9,13 @@ import 'package:flutter/services.dart';
 class CobradorClienteDetalleScreen extends StatefulWidget {
   final Map<String, dynamic> cliente;
   final Map<String, dynamic> prestamo;
+  final bool enRuta;
 
   const CobradorClienteDetalleScreen({
     super.key,
     required this.cliente,
     required this.prestamo,
+    this.enRuta = true,
   });
 
   @override
@@ -114,14 +116,33 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
     }
   }
 
-  // ── Helpers ──────────────────────────────────────────────
+  // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   Map<String, dynamic>? _cuotaHoy() {
+    final hoy = DateTime.now();
+    final hoyDate = DateTime(hoy.year, hoy.month, hoy.day);
+    
+    // 1. Primero buscar la cuota normal de hoy (o pasada que siga pendiente)
     for (var c in _cuotas) {
       if (c['estado_pago'] == 'pendiente') {
+        final vencimiento = DateTime.tryParse(c['fecha_vencimiento'] ?? '');
+        if (vencimiento == null) continue;
+        final vencDate = DateTime(vencimiento.year, vencimiento.month, vencimiento.day);
+        
+        if (!vencDate.isAfter(hoyDate)) {
+          return c;
+        }
+      }
+    }
+    
+    // 2. Si ya no hay cuotas pendientes para hoy (ej. llegamos al final del plazo),
+    // empezamos a cobrar las cuotas que se quedaron rezagadas (vencidas).
+    for (var c in _cuotas) {
+      if (c['estado_pago'] == 'vencido') {
         return c;
       }
     }
+    
     return null;
   }
 
@@ -148,12 +169,13 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
     ));
   }
 
-  // ── Imprimir Ticket ─────────────────────────────────────
+  // â”€â”€ Imprimir Ticket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Future<void> _imprimirTicket({
     required double montoPagado,
     int cuotasQueSePagan = 1,
     bool esLiquidacion = false,
     bool soloMora = false,
+    double moraPagada = 0,
   }) async {
     try {
       bool? connected = await _bluetooth.isConnected;
@@ -168,7 +190,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
       final cuotasPagadas = _cuotas.where((c) => c['estado_pago'] == 'pagado').length;
       // Plazo total (cuántos pagos tiene el crédito)
       final plazo = (p['plazo_dias'] ?? _cuotas.length) as int;
-      // Pagos restantes DESPUÉS de este pago
+      // Pagos restantes DESPUí‰S de este pago
       final cuotasRestantes = plazo - cuotasPagadas;
 
       final cuotaDiaria = (p['cuota_diaria'] ?? 0).toDouble();
@@ -188,7 +210,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
         } catch (_) {}
       }
 
-      // ── ENCABEZADO ─────────────────────────────────────
+      // â”€â”€ ENCABEZADO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       for (String line in _ticketHeader.toUpperCase().split('\n')) {
         final l = line.trim();
         if (l.isNotEmpty) _bluetooth.printCustom(l, 2, 1);
@@ -199,7 +221,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
       }
       _bluetooth.printNewLine();
 
-      // ── DATOS DEL CLIENTE ──────────────────────────────
+      // â”€â”€ DATOS DEL CLIENTE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       _bluetooth.printCustom('FECHA: $dateF   HORA: $timeF', 1, 0);
       final nombreCorto = nombreCliente.length > 24 ? nombreCliente.substring(0, 24) : nombreCliente;
       _bluetooth.printCustom('CLIENTE: $nombreCorto', 1, 0);
@@ -229,8 +251,8 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
         }
       }
       
-      if (esLiquidacion && mora > 0) {
-        _bluetooth.printLeftRight('MORA INCLUIDA:', '\$${mora.toStringAsFixed(2)}', 1);
+      if (esLiquidacion && moraPagada > 0) {
+        _bluetooth.printLeftRight('MORA INCLUIDA:', '\$${moraPagada.toStringAsFixed(2)}', 1);
       }
       
       _bluetooth.printLeftRight('IMPORTE:', '\$${montoPagado.toStringAsFixed(2)}', 1);
@@ -288,7 +310,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
     ) ?? false;
   }
 
-  // ── Acciones ─────────────────────────────────────────────
+  // â”€â”€ Acciones â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   Future<void> _cobrar() async {
     final cuota = _cuotaHoy();
@@ -349,6 +371,8 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
           'p_fecha_local': fechaLocal,
         });
       }
+      // RECARGAR DATOS PARA QUE APAREZCA EL BOTí“N DE "PAGAR MORA" INMEDIATAMENTE
+      await _fetchData();
       if (mounted) setState(() { _atendido = true; _resultadoAccion = 'no_pago'; });
     } catch (e) {
       _showSnack('Error: $e', isError: true);
@@ -437,11 +461,8 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
 
     final totalAPagar = result * moraPorDia;
 
-    final cuotasPendientes = _cuotas.where((c) => c['estado_pago'] == 'pendiente').toList();
-    if (cuotasPendientes.isEmpty) {
-      _showSnack('No hay cuotas pendientes para registrar el pago.', isError: true);
-      return;
-    }
+    final cuotasPendientes = _cuotas.where((c) => c['estado_pago'] != 'pagado').toList();
+    final cuotaIdRef = cuotasPendientes.isNotEmpty ? cuotasPendientes.first['id'] : _cuotas.last['id'];
 
     setState(() => _isProcessing = true);
     try {
@@ -450,7 +471,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
       
       await Supabase.instance.client.rpc('fn_procesar_pago', params: {
         'p_prestamo_id': _prestamo!['id'],
-        'p_cuota_id': cuotasPendientes.first['id'],
+        'p_cuota_id': cuotaIdRef,
         'p_monto_total': totalAPagar,
         'p_monto_base': 0, // No se pagan cuotas
         'p_monto_mora': totalAPagar,
@@ -483,19 +504,11 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
     final cuotaDiaria = (_prestamo?['cuota_diaria'] ?? 0).toDouble();
     final atrasosConteo = (_prestamo?['cuotas_atrasadas_conteo'] ?? 0) as int;
 
-    // Solo se adelantan cuotas FUTURAS (fecha_vencimiento >= hoy)
-    // Las cuotas atrasadas se aplazó la fecha de finalización del crédito
-    final hoy = DateTime.now();
-    final hoyDate = DateTime(hoy.year, hoy.month, hoy.day);
-    final cuotasFuturas = _cuotas.where((c) {
-      if (c['estado_pago'] != 'pendiente') return false;
-      final fecha = DateTime.tryParse(c['fecha_vencimiento'] ?? '');
-      if (fecha == null) return false;
-      return !fecha.isBefore(hoyDate); // fecha >= hoy
-    }).toList();
+    // Permitir adelantar/pagar múltiple cualquier cuota no pagada
+    final cuotasFuturas = _cuotas.where((c) => c['estado_pago'] != 'pagado').toList();
 
     if (cuotasFuturas.isEmpty) {
-      _showSnack('No hay cuotas futuras para adelantar.', isError: true);
+      _showSnack('No hay cuotas para procesar.', isError: true);
       return;
     }
     final maxCuotas = cuotasFuturas.length;
@@ -524,7 +537,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Este cliente tiene $atrasosConteo cuota(s) atrasada(s). Los adelantos solo cubren cuotas futuras. Las cuotas atrasadas extienden la fecha de finalización del crédito.',
+                          'Este cliente tiene $atrasosConteo cuota(s) atrasada(s). Puedes usar esta opción para recuperar pagos atrasados rápidamente o adelantar futuras.',
                           style: const TextStyle(color: Color(0xFF92400E), fontSize: 12),
                         ),
                       ),
@@ -605,31 +618,41 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
     final ok = await _confirm('Liquidar Crédito', '¿Deseas liquidar este crédito por ${formatter.format(totalALiquidar)}?\n\nEsto registrará el cobro del saldo pendiente y moras.');
     if (!ok) return;
 
-    final cuotasPendientes = _cuotas.where((c) => c['estado_pago'] == 'pendiente').toList();
-    if (cuotasPendientes.isEmpty) {
-      _showSnack('No hay cuotas pendientes para registrar.', isError: true);
-      return;
-    }
+    final cuotasPendientes = _cuotas.where((c) => c['estado_pago'] != 'pagado').toList();
 
     setState(() => _isProcessing = true);
     try {
       final cobradorId = Supabase.instance.client.auth.currentUser!.id;
       final fechaLocal = DateTime.now().toLocal().toIso8601String().split('T')[0];
       
-      // Pagamos todas las cuotas individualmente para mantener el historial
-      for (var cuota in cuotasPendientes) {
-         final montoC = (cuota['monto_cuota'] ?? 0).toDouble();
-         final bool esPrimera = cuota == cuotasPendientes.first;
-         await Supabase.instance.client.rpc('fn_procesar_pago', params: {
-            'p_prestamo_id': _prestamo!['id'],
-            'p_cuota_id': cuota['id'],
-            'p_monto_total': montoC + (esPrimera ? mora : 0),
-            'p_monto_base': montoC,
-            'p_monto_mora': esPrimera ? mora : 0,
-            'p_monto_penalizacion': 0,
-            'p_cobrador_id': cobradorId,
-            'p_fecha_local': fechaLocal,
-         });
+      if (cuotasPendientes.isEmpty) {
+        // En caso excepcional sin cuotas por pagar pero con saldo
+        await Supabase.instance.client.rpc('fn_procesar_pago', params: {
+          'p_prestamo_id': _prestamo!['id'],
+          'p_cuota_id': _cuotas.last['id'],
+          'p_monto_total': totalALiquidar,
+          'p_monto_base': faltante,
+          'p_monto_mora': mora,
+          'p_monto_penalizacion': 0,
+          'p_cobrador_id': cobradorId,
+          'p_fecha_local': fechaLocal,
+        });
+      } else {
+        // Pagamos todas las cuotas individualmente para mantener el historial
+        for (var cuota in cuotasPendientes) {
+           final montoC = (cuota['monto_cuota'] ?? 0).toDouble();
+           final bool esPrimera = cuota == cuotasPendientes.first;
+           await Supabase.instance.client.rpc('fn_procesar_pago', params: {
+              'p_prestamo_id': _prestamo!['id'],
+              'p_cuota_id': cuota['id'],
+              'p_monto_total': montoC + (esPrimera ? mora : 0),
+              'p_monto_base': montoC,
+              'p_monto_mora': esPrimera ? mora : 0,
+              'p_monto_penalizacion': 0,
+              'p_cobrador_id': cobradorId,
+              'p_fecha_local': fechaLocal,
+           });
+        }
       }
 
       await Supabase.instance.client.from('prestamos').update({'estado': 'liquidado'}).eq('id', _prestamo!['id']);
@@ -643,6 +666,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
         montoPagado: totalALiquidar,
         cuotasQueSePagan: cuotasPendientes.length,
         esLiquidacion: true,
+        moraPagada: mora,
       );
 
       _showSnack('Crédito liquidado exitosamente.');
@@ -805,7 +829,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
     try { await launchUrl(Uri.parse('tel:$t')); } catch (_) {}
   }
 
-  // ── UI ───────────────────────────────────────────────────
+  // â”€â”€ UI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   @override
   Widget build(BuildContext context) {
@@ -813,14 +837,17 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
       return const Scaffold(backgroundColor: Color(0xFFF9FAFB), body: Center(child: CircularProgressIndicator(color: Color(0xFF09305A))));
     }
     final p = _prestamo!;
-    final cuotasPagadas = _cuotas.where((c) => c['estado_pago'] == 'pagado' || c['estado_pago'] == 'vencido').length;
+    final atrasosConteo = (p['cuotas_atrasadas_conteo'] ?? 0) as int;
+    
+    // Aumentar dias totales en base a las cuotas atrasadas (para mostrar el progreso corregido)
+    final cuotasPagadas = _cuotas.where((c) => c['estado_pago'] == 'pagado').length;
     final totalCuotas = _cuotas.length;
     final progreso = totalCuotas == 0 ? 0.0 : cuotasPagadas / totalCuotas;
+    
     final cuotaDiaria = (p['cuota_diaria'] ?? 0).toDouble();
     final faltante = (p['faltante_actual'] ?? 0).toDouble();
     final mora = (p['mora_acumulada'] ?? 0).toDouble();
     final penalizacion = (p['penalizacion_aplicada'] ?? 0).toDouble();
-    final atrasosConteo = (p['cuotas_atrasadas_conteo'] ?? 0) as int;
     final montoAtrasos = atrasosConteo * cuotaDiaria;
     final tieneMoraOAtraso = mora > 0 || atrasosConteo > 0;
     final idShort = widget.cliente['id'].toString().substring(0, 8).toUpperCase();
@@ -858,6 +885,29 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
           ListView(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 160),
             children: [
+              // BANNER: Modo consulta (fuera de ruta)
+              if (!widget.enRuta)
+                Container(
+                  margin: const EdgeInsets.only(top: 12, bottom: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF7CD),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFF59E0B)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.visibility_outlined, color: Color(0xFFB45309), size: 20),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'MODO CONSULTA â€” Este cliente no está en tu ruta de hoy. No puedes realizar acciones.',
+                          style: TextStyle(color: Color(0xFFB45309), fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               // Nombre
               Text(widget.cliente['nombre_completo'] ?? 'Sin nombre',
                   style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF09305A))),
@@ -878,7 +928,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.shade200)),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Text('CRÉDITO', style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold)),
+                      const Text('CRí‰DITO', style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 6),
                       Text('$cuotasPagadas / $totalCuotas', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF09305A))),
                       const SizedBox(height: 6),
@@ -919,15 +969,15 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
                   if (mora > 0 || atrasosConteo > 0) ...[
                     const SizedBox(height: 6),
                     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      const Text('  └ Crédito:', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      const Text('  â”” Crédito:', style: TextStyle(color: Colors.grey, fontSize: 12)),
                       Text(formatter.format(faltante), style: const TextStyle(color: Colors.grey, fontSize: 12)),
                     ]),
                     if (mora > 0) Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      const Text('  └ Moratorios:', style: TextStyle(color: Color(0xFFDC2626), fontSize: 12)),
+                      const Text('  â”” Moratorios:', style: TextStyle(color: Color(0xFFDC2626), fontSize: 12)),
                       Text(formatter.format(mora), style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12, fontWeight: FontWeight.bold)),
                     ]),
                     if (atrasosConteo > 0) Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      Text('  └ Cuota atrasada ($atrasosConteo):', style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12)),
+                      Text('  â”” Cuota atrasada ($atrasosConteo):', style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12)),
                       Text(formatter.format(montoAtrasos), style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12, fontWeight: FontWeight.bold)),
                     ]),
                   ],
@@ -936,7 +986,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
                   // Botón adelantar
                   if (p['estado'] != 'liquidado' && faltante > 0)
                     InkWell(
-                      onTap: _isProcessing ? null : _adelantarPagos,
+                      onTap: (_isProcessing || !widget.enRuta) ? null : _adelantarPagos,
                       borderRadius: BorderRadius.circular(12),
                       child: Container(
                         width: double.infinity,
@@ -956,7 +1006,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
                   // Botón Liquidar
                   if (p['estado'] != 'liquidado' && faltante > 0)
                     InkWell(
-                      onTap: _isProcessing ? null : _liquidarCredito,
+                      onTap: (_isProcessing || !widget.enRuta) ? null : _liquidarCredito,
                       borderRadius: BorderRadius.circular(12),
                       child: Container(
                         width: double.infinity,
@@ -979,7 +1029,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
               // Botón Renovar (Anticipada)
                   if (cuotasPagadas >= 18 && p['estado'] != 'liquidado' && faltante > 0)
                     InkWell(
-                      onTap: _isProcessing ? null : () => _solicitarRenovacion(true),
+                      onTap: (_isProcessing || !widget.enRuta) ? null : () => _solicitarRenovacion(true),
                       borderRadius: BorderRadius.circular(12),
                       child: Container(
                         width: double.infinity,
@@ -996,7 +1046,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
                   // Botón Renovar (Liquidado)
                   if (p['estado'] == 'liquidado' || faltante <= 0)
                     InkWell(
-                      onTap: _isProcessing ? null : () => _solicitarRenovacion(false),
+                      onTap: (_isProcessing || !widget.enRuta) ? null : () => _solicitarRenovacion(false),
                       borderRadius: BorderRadius.circular(12),
                       child: Container(
                         width: double.infinity,
@@ -1030,7 +1080,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed: _isProcessing ? null : _pagarMoraAtraso,
+                        onPressed: (_isProcessing || !widget.enRuta) ? null : _pagarMoraAtraso,
                         icon: const Icon(Icons.credit_card, size: 18, color: Colors.white),
                         label: const Text('PAGAR MORA', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                         style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626), padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
@@ -1071,14 +1121,14 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
                         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 16, offset: const Offset(0, -4))],
                       ),
                       child: Row(children: [
-                        Expanded(child: _accionBtn('NO PAGÓ', Icons.cancel_outlined, const Color(0xFFFFF1F2), const Color(0xFFDC2626), _isProcessing ? null : _noPago)),
+                        Expanded(child: _accionBtn('NO PAGí“', Icons.cancel_outlined, const Color(0xFFFFF1F2), const Color(0xFFDC2626), (_isProcessing || !widget.enRuta) ? null : _noPago)),
                         const SizedBox(width: 8),
-                        Expanded(child: _accionBtn('PASAR', Icons.schedule_outlined, const Color(0xFFFFFBEB), const Color(0xFFD97706), _isProcessing ? null : _pasar)),
+                        Expanded(child: _accionBtn('PASAR', Icons.schedule_outlined, const Color(0xFFFFFBEB), const Color(0xFFD97706), (_isProcessing || !widget.enRuta) ? null : _pasar)),
                         const SizedBox(width: 8),
                         Expanded(
                           flex: 2,
                           child: ElevatedButton.icon(
-                            onPressed: _isProcessing ? null : _cobrar,
+                            onPressed: (_isProcessing || !widget.enRuta) ? null : _cobrar,
                             icon: const Icon(Icons.check_circle_outline, size: 18, color: Colors.white),
                             label: const Text('COBRAR', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
                             style: ElevatedButton.styleFrom(
@@ -1142,7 +1192,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                esCobrado ? '¡Cobro Registrado!' : 'Registrado como No Pagó',
+                esCobrado ? 'Â¡Cobro Registrado!' : 'Registrado como No Pagó',
                 style: TextStyle(
                   color: esCobrado ? const Color(0xFF15803D) : const Color(0xFFC2410C),
                   fontWeight: FontWeight.bold,

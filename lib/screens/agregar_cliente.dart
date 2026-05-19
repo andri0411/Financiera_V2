@@ -231,14 +231,25 @@ class _AgregarClienteScreenState extends State<AgregarClienteScreen> {
       double intBase = (_config['tasa_interes_base'] ?? 25) / 100;
       double porcentajeCuota = (_config['porcentaje_cuota_diaria'] ?? 5) / 100;
 
+      // Calcular la fecha de inicio en hora LOCAL para evitar desfase UTC.
+      // Mañana en hora local (no UTC). Si mañana es día no hábil, el trigger
+      // lo ajustará con fn_siguiente_dia_laboral. Enviamos la fecha mínima
+      // candidata para que el trigger la use como base en lugar de CURRENT_DATE.
+      final hoyLocal = DateTime.now().toLocal();
+      final mananaLocal = DateTime(hoyLocal.year, hoyLocal.month, hoyLocal.day)
+          .add(const Duration(days: 1));
+      final fechaInicioStr =
+          '${mananaLocal.year.toString().padLeft(4, '0')}-${mananaLocal.month.toString().padLeft(2, '0')}-${mananaLocal.day.toString().padLeft(2, '0')}';
+
       await Supabase.instance.client.from('prestamos').insert({
         'cliente_id': clienteId,
         'cobrador_id': _cobradorSeleccionado,
         'monto_principal': montoP,
         'monto_total_pagar': montoP + (montoP * intBase),
         'cuota_diaria': montoP * porcentajeCuota,
-        'plazo_dias': _plazoDias, 
+        'plazo_dias': _plazoDias,
         'estado': 'activo',
+        'fecha_inicio': fechaInicioStr, // ← fecha local explícita (evita bug UTC)
       });
 
       if (mounted) {

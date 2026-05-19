@@ -96,7 +96,9 @@ class _AdminRenovacionDetalleScreenState extends State<AdminRenovacionDetalleScr
     final c = _configuracion!;
     
     final montoSolicitado = (widget.solicitud['monto_solicitado'] ?? 0).toDouble();
-    final faltanteAnterior = (p['faltante_actual'] ?? 0).toDouble();
+    final double faltanteBase = (p['faltante_actual'] ?? 0).toDouble();
+    final double moratorios = (p['mora_acumulada'] ?? 0).toDouble();
+    final faltanteAnterior = faltanteBase + moratorios;
     
     // Matemática del Nuevo Préstamo
     final tasaInteres = (c['tasa_interes_base'] ?? 25).toDouble() / 100.0;

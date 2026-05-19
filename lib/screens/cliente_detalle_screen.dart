@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'dart:io';
@@ -24,6 +24,7 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
   Map<String, dynamic>? _prestamoActivo;
   List<dynamic> _cuotas = [];
   Map<String, dynamic>? _clienteActualizado;
+  Map<String, dynamic>? _atencionHoy;
 
   @override
   void initState() {
@@ -39,6 +40,15 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
           .select()
           .eq('id', widget.cliente['id'])
           .single();
+
+      // Consultar atencion diaria de hoy
+      final hoyStr = DateTime.now().toLocal().toIso8601String().split('T')[0];
+      final resAtencion = await Supabase.instance.client
+          .from('atencion_diaria')
+          .select()
+          .eq('cliente_id', widget.cliente['id'])
+          .eq('fecha', hoyStr)
+          .maybeSingle();
 
       // 2. Traer el ultimo prestamo (puede ser activo, liquidado o renovado)
       final resPrestamoList = await Supabase.instance.client
@@ -65,6 +75,7 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
 
       setState(() {
         _clienteActualizado = resCliente;
+        _atencionHoy = resAtencion;
         _isLoading = false;
       });
     } catch (e) {
@@ -203,8 +214,31 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
     }
 
     final clienteInfo = _clienteActualizado ?? widget.cliente;
+    final int atrasosConteoGeneral = (_prestamoActivo != null) ? ((_prestamoActivo!['cuotas_atrasadas_conteo'] ?? 0) as int) : 0;
+    
+    List<Map<String, dynamic>> cuotasMostrar = List<Map<String, dynamic>>.from(_cuotas);
+    if (atrasosConteoGeneral > 0 && cuotasMostrar.isNotEmpty) {
+      Map<String, dynamic> ultimaCuota = cuotasMostrar.last;
+      DateTime ultimaFecha = DateTime.tryParse(ultimaCuota['fecha_vencimiento'] ?? '') ?? DateTime.now();
+      double montoCuotaDiaria = (_prestamoActivo!['cuota_diaria'] ?? 0).toDouble();
+      
+      for (int i = 0; i < atrasosConteoGeneral; i++) {
+        ultimaFecha = ultimaFecha.add(const Duration(days: 1));
+        if (ultimaFecha.weekday == DateTime.sunday) {
+          ultimaFecha = ultimaFecha.add(const Duration(days: 1));
+        }
+        cuotasMostrar.add({
+          'numero_cuota': _cuotas.length + i + 1,
+          'monto_cuota': montoCuotaDiaria,
+          'estado_pago': 'pendiente',
+          'fecha_vencimiento': ultimaFecha.toIso8601String(),
+          'virtual': true
+        });
+      }
+    }
+
     final int totalCuotas = _cuotas.length;
-    final int cuotasPagadas = _cuotas.where((c) => c['estado_pago'] == 'pagado' || c['estado_pago'] == 'vencido').length;
+    final int cuotasPagadas = cuotasMostrar.where((c) => c['estado_pago'] == 'pagado').length;
     final double progreso = totalCuotas == 0 ? 0 : (cuotasPagadas / totalCuotas);
     final idClienteShort = clienteInfo['id'].toString().substring(0, 8).toUpperCase();
 
@@ -344,7 +378,7 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
                 // Historial de Pagos
                 const Text('HISTORIAL DE PAGOS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
                 const SizedBox(height: 16),
-                ..._cuotas.map((cuota) => _buildCuotaTile(cuota)),
+                  ...cuotasMostrar.map((cuota) => _buildCuotaTile(cuota)),
 
                 const SizedBox(height: 32),
               ] else ...[
@@ -567,6 +601,12 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
     bool isAtrasada = estado == 'pendiente' && cuotaDate.isBefore(hoy);
     bool isHoy = estado == 'pendiente' && cuotaDate.isAtSameMomentAs(hoy);
 
+    // Si la atención de hoy dice "no_pago", tratamos la cuota de hoy como "vencida" para que tenga la X roja.
+    if (isHoy && _atencionHoy != null && _atencionHoy!['estado'] == 'no_pago') {
+      isHoy = false;
+      isVencida = true;
+    }
+
     // Mantenemos colores solicitados, pero adaptados al layout de la imagen
     Color bgColor;
     Color fgColor;
@@ -625,7 +665,7 @@ class _ClienteDetalleScreenState extends State<ClienteDetalleScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Cuota $numCuota', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: isAtrasada ? fgColor : Colors.black87)),
+                Text('Día $numCuota', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: isAtrasada ? fgColor : Colors.black87)),
                 const SizedBox(height: 2),
                 Row(
                   children: [
