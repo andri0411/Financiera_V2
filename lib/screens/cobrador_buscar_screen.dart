@@ -53,7 +53,9 @@ class _CobradorBuscarScreenState extends State<CobradorBuscarScreen> {
           if (!clientesAgregados.contains(clienteId)) {
             clientesAgregados.add(clienteId);
             // Según lo solicitado, mostramos de "PENDIENTE" el monto principal (lo prestado sin interés)
-            double montoPendiente = (prestamo['monto_principal'] ?? 0).toDouble();
+            double faltante = (prestamo['faltante_actual'] ?? 0).toDouble();
+              double mora = (prestamo['mora_acumulada'] ?? 0).toDouble();
+              double montoPendiente = faltante + mora;
             
             clientesTemp.add({
               'cliente': cliente,

@@ -928,7 +928,7 @@ class _CobradorClienteDetalleScreenState extends State<CobradorClienteDetalleScr
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.shade200)),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Text('CRí‰DITO', style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold)),
+                      const Text('CRÉDITO', style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 6),
                       Text('$cuotasPagadas / $totalCuotas', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF09305A))),
                       const SizedBox(height: 6),
